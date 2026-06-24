@@ -7,11 +7,6 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      image_tag:
-        description: 'Docker image tag'
-        required: false
-        default: 'latest'
 
 env:
   REGISTRY: ghcr.io
@@ -53,6 +48,7 @@ jobs:
             type=sha,prefix=,suffix=,format=short
             type=raw,value=latest,enable={{is_default_branch}}
 
+      # ── 1. distroless (最小 ~5MB, 纯静态binary) ──
       - name: Build & push (distroless)
         uses: docker/build-push-action@v6
         with:
@@ -62,11 +58,9 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
           provenance: false
 
+      # ── 2. alpine (~8MB, 含 curl/ca-certificates) ──
       - name: Build & push (alpine)
         uses: docker/build-push-action@v6
         with:
@@ -76,16 +70,26 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}-alpine
           labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          provenance: false
+
+      # ── 3. busybox (~3MB, 最极小) ──
+      - name: Build & push (busybox)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: busybox
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}-busybox
+          labels: ${{ steps.meta.outputs.labels }}
           provenance: false
 
       - name: Image summary
         run: |
           echo "## Docker images built" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo '| Variant | Tags | Size | Base |' >> $GITHUB_STEP_SUMMARY
+          echo '| Variant | Tag | Base | Est. size |' >> $GITHUB_STEP_SUMMARY
           echo '|---|---|---|---|' >> $GITHUB_STEP_SUMMARY
-          echo '| distroless | `${{ steps.meta.outputs.tags }}` | ~15MB | gcr.io/distroless/cc-debian12 |' >> $GITHUB_STEP_SUMMARY
-          echo '| alpine | `${{ steps.meta.outputs.tags }}-alpine` | ~20MB | alpine:3.20 |' >> $GITHUB_STEP_SUMMARY
+          echo '| distroless | `${{ steps.meta.outputs.tags }}` | gcr.io/distroless/static | ~5MB |' >> $GITHUB_STEP_SUMMARY
+          echo '| alpine | `${{ steps.meta.outputs.tags }}-alpine` | alpine:3.20 | ~8MB |' >> $GITHUB_STEP_SUMMARY
+          echo '| busybox | `${{ steps.meta.outputs.tags }}-busybox` | busybox:glibc | ~3MB |' >> $GITHUB_STEP_SUMMARY
