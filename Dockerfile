@@ -1,10 +1,10 @@
 # =============================================================
-# Stage 1: Build — Rust (Debian/glibc, default target)
+# Stage 1: Build — Rust (Debian/glibc)
 # =============================================================
 FROM rust:slim-bookworm AS builder
 
 RUN apt-get update -qq && apt-get install -y -qq \
-    pkg-config libssl-dev cmake && \
+    pkg-config libssl-dev cmake perl-modules && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
