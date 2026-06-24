@@ -1,0 +1,75 @@
+# Docker Compose for claude-code-mux
+# =====================================
+# 镜像说明:
+#   ghcr.io/winffychu/claude-code-mux:latest         ← distroless (~5MB, 生产推荐)
+#   ghcr.io/winffychu/claude-code-mux:latest-alpine  ← alpine (~10MB, 调试/诊断)
+#   ghcr.io/winffychu/claude-code-mux:latest-busybox ← busybox (~7MB, 资源受限)
+#
+# 使用方式:
+#   docker compose up -d                    # distroless (默认)
+#   docker compose up -d ccm-alpine         # alpine 变体
+#   docker compose run --rm ccm --version   # 查看版本
+# =====================================
+
+services:
+  # ── 默认: distroless (生产推荐, ~5MB) ──
+  ccm:
+    image: ghcr.io/winffychu/claude-code-mux:latest
+    container_name: ccm
+    restart: unless-stopped
+    ports:
+      - "13456:13456"
+    volumes:
+      # 配置目录 (首次启动自动生成默认配置)
+      - ccm-config:/root/.claude-code-mux
+    environment:
+      - RUST_LOG=info
+    # 健康检查: distroless 无 shell, 用 --version 代替
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/ccm", "--version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── alpine 变体 (调试用, 含 sh+curl, ~10MB) ──
+  ccm-alpine:
+    image: ghcr.io/winffychu/claude-code-mux:latest-alpine
+    container_name: ccm-alpine
+    restart: unless-stopped
+    ports:
+      - "13457:13456"
+    volumes:
+      - ccm-config-alpine:/root/.claude-code-mux
+    environment:
+      - RUST_LOG=debug
+    # alpine 有 shell, 可用 HTTP 检查
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:13456/api/config/json"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── busybox 变体 (资源受限, ~7MB) ──
+  ccm-busybox:
+    image: ghcr.io/winffychu/claude-code-mux:latest-busybox
+    container_name: ccm-busybox
+    restart: unless-stopped
+    ports:
+      - "13458:13456"
+    volumes:
+      - ccm-config-busybox:/root/.claude-code-mux
+    environment:
+      - RUST_LOG=warn
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/ccm", "--version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  ccm-config:
+  ccm-config-alpine:
+  ccm-config-busybox:
