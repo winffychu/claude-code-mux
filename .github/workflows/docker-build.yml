@@ -72,7 +72,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false
 
-      # ── 3. busybox (~4MB, 含 shell 工具) ──
+      # ── 3. busybox (~4MB, 含 shell, 资源受限环境推荐) ──
       - name: Build & push (busybox)
         uses: docker/build-push-action@v6
         with:
@@ -84,25 +84,12 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           provenance: false
 
-      # ── 4. scratch — 真正最小 (~3MB, 仅有 binary) ──
-      - name: Build & push (scratch)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile
-          target: scratch
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}-scratch
-          labels: ${{ steps.meta.outputs.labels }}
-          provenance: false
-
       - name: Image summary
         run: |
-          echo "## Docker images built" >> $GITHUB_STEP_SUMMARY
+          echo "## 🐳 Docker images built" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo '| Variant | Tag | Base | Est. size |' >> $GITHUB_STEP_SUMMARY
-          echo '|---|---|---|---|' >> $GITHUB_STEP_SUMMARY
-          echo '| distroless | `${{ steps.meta.outputs.tags }}` | gcr.io/distroless/static | ~5MB (含系统文件结构) |' >> $GITHUB_STEP_SUMMARY
-          echo '| alpine | `${{ steps.meta.outputs.tags }}-alpine` | alpine:3.20 | ~8MB (含 curl + ca-cert) |' >> $GITHUB_STEP_SUMMARY
-          echo '| busybox | `${{ steps.meta.outputs.tags }}-busybox` | busybox:glibc | ~4MB (含 shell) |' >> $GITHUB_STEP_SUMMARY
-          echo '| scratch | `${{ steps.meta.outputs.tags }}-scratch` | scratch (空) | ~3MB (仅 binary, 最小) |' >> $GITHUB_STEP_SUMMARY
+          echo '| Variant | Tag | Base | Est. size | 推荐场景 |' >> $GITHUB_STEP_SUMMARY
+          echo '|---|---|---|---|---|' >> $GITHUB_STEP_SUMMARY
+          echo '| distroless | `${{ steps.meta.outputs.tags }}` | gcr.io/distroless/static | ~5MB | 生产默认 (CA证书+系统结构) |' >> $GITHUB_STEP_SUMMARY
+          echo '| alpine | `${{ steps.meta.outputs.tags }}-alpine` | alpine:3.20 | ~8MB | 需调试/诊断 (含sh+curl) |' >> $GITHUB_STEP_SUMMARY
+          echo '| busybox | `${{ steps.meta.outputs.tags }}-busybox` | busybox:glibc | ~4MB | 资源极度受限 |' >> $GITHUB_STEP_SUMMARY
