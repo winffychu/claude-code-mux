@@ -1,7 +1,10 @@
-name: 🐳 Docker Build Matrix
+name: 🐳 Docker Build
 
 on:
   push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
     branches: [main]
   workflow_dispatch:
 
@@ -20,24 +23,15 @@ jobs:
       fail-fast: false
       matrix:
         variant:
-          - id: glibc-distroless
-            target: glibc-distroless
-            desc: "glibc + distroless/cc"
-          - id: glibc-busybox
-            target: glibc-busybox
-            desc: "glibc + busybox:glibc"
-          - id: glibc-alpine
-            target: glibc-alpine
-            desc: "glibc + alpine+gcompat"
-          - id: musl-distroless
-            target: musl-distroless
-            desc: "musl(静态) + distroless/static"
-          - id: musl-busybox
-            target: musl-busybox
-            desc: "musl(静态) + busybox:glibc"
-          - id: musl-alpine
-            target: musl-alpine
-            desc: "musl(静态) + alpine"
+          - target: distroless
+            tag_suffix: ""
+            desc: "distroless (生产推荐, ~5MB压缩)"
+          - target: alpine
+            tag_suffix: -alpine
+            desc: "alpine (调试诊断, ~10MB压缩)"
+          - target: busybox
+            tag_suffix: -busybox
+            desc: "busybox (资源受限, ~7MB压缩)"
 
     steps:
       - uses: actions/checkout@v4
@@ -46,6 +40,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Login to GHCR
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -57,52 +52,15 @@ jobs:
         with:
           context: .
           target: ${{ matrix.variant.target }}
-          push: true
-          load: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.variant.id }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest${{ matrix.variant.tag_suffix }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}${{ matrix.variant.tag_suffix }}
           provenance: false
 
-      - name: Inspect ${{ matrix.variant.desc }}
+      - name: Summary
         run: |
-          IMG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.variant.id }}"
-
-          BYTES=$(docker image inspect "$IMG" --format '{{.Size}}' 2>/dev/null || echo 0)
-          MB=$(python3 -c "print(f'{float($BYTES)/1024/1024:.1f}')" 2>/dev/null || echo "?")
-
-          echo "### ${{ matrix.variant.desc }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **镜像大小**: $MB MB" >> $GITHUB_STEP_SUMMARY
-
-          # Check if binary works
-          BIN_PATH="/usr/local/bin/ccm"
-          if docker run --rm --entrypoint "$BIN_PATH" "$IMG" --version 2>/dev/null; then
-            echo "- **Binary**: ✅ ccm --version OK" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- **Binary**: ❌ 启动失败" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          # Check shell, CA, ldd via a throwaway container that copies binary out
-          CID=$(docker create "$IMG" 2>/dev/null)
-          if [ -n "$CID" ]; then
-            docker cp "$CID:$BIN_PATH" /tmp/ccm.bin 2>/dev/null || true
-            docker rm "$CID" >/dev/null 2>&1 || true
-
-            if [ -f /tmp/ccm.bin ]; then
-              echo "- **file类型**: $(file /tmp/ccm.bin 2>/dev/null | cut -d: -f2-)" >> $GITHUB_STEP_SUMMARY
-              BIN_SIZE=$(stat -c%s /tmp/ccm.bin 2>/dev/null || echo 0)
-              BIN_MB=$(python3 -c "print(f'{float($BIN_SIZE)/1024/1024:.2f}')" 2>/dev/null)
-              echo "- **Binary大小**: $BIN_MB MB" >> $GITHUB_STEP_SUMMARY
-              rm -f /tmp/ccm.bin
-            fi
-          fi
-
-          # Check shell availability  
-          if docker run --rm --entrypoint /bin/sh "$IMG" -c "exit 0" 2>/dev/null; then
-            echo "- **Shell**: ✅ /bin/sh" >> $GITHUB_STEP_SUMMARY
-          elif docker run --rm --entrypoint /bin/busybox "$IMG" true 2>/dev/null; then
-            echo "- **Shell**: ✅ busybox" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- **Shell**: ❌ 无 shell (distroless/minimal)" >> $GITHUB_STEP_SUMMARY
-          fi
-
+          echo "✅ ${{ matrix.variant.desc }}" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest${{ matrix.variant.tag_suffix }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}${{ matrix.variant.tag_suffix }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
