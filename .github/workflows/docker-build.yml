@@ -52,23 +52,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build ${{ matrix.desc }}
+      - name: Build ${{ matrix.variant.desc }}
         uses: docker/build-push-action@v6
         with:
           context: .
-          target: ${{ matrix.target }}
+          target: ${{ matrix.variant.target }}
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.id }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.variant.id }}
           provenance: false
 
-      - name: Inspect ${{ matrix.desc }}
+      - name: Inspect ${{ matrix.variant.desc }}
         run: |
-          IMG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.id }}"
+          IMG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.variant.id }}"
 
           BYTES=$(docker image inspect "$IMG" --format '{{.Size}}' 2>/dev/null || echo 0)
           MB=$(python3 -c "print(f'{float($BYTES)/1024/1024:.1f}')" 2>/dev/null || echo "?")
 
-          echo "### ${{ matrix.desc }}" >> $GITHUB_STEP_SUMMARY
+          echo "### ${{ matrix.variant.desc }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **镜像大小**: $MB MB" >> $GITHUB_STEP_SUMMARY
 
