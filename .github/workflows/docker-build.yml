@@ -1,10 +1,7 @@
-name: Docker Build
+name: 🐳 Docker Build Matrix
 
 on:
   push:
-    branches: [main]
-    tags: ['v*']
-  pull_request:
     branches: [main]
   workflow_dispatch:
 
@@ -19,77 +16,94 @@ jobs:
       contents: read
       packages: write
 
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - id: glibc-distroless
+            target: glibc-distroless
+            desc: "glibc + distroless/cc"
+          - id: glibc-busybox
+            target: glibc-busybox
+            desc: "glibc + busybox:glibc"
+          - id: glibc-alpine
+            target: glibc-alpine
+            desc: "glibc + alpine+gcompat"
+          - id: musl-distroless
+            target: musl-distroless
+            desc: "musl(静态) + distroless/static"
+          - id: musl-busybox
+            target: musl-busybox
+            desc: "musl(静态) + busybox:glibc"
+          - id: musl-alpine
+            target: musl-alpine
+            desc: "musl(静态) + alpine"
+
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Login to GHCR
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=ref,event=pr
-            type=sha,prefix=,suffix=,format=short
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      # ── 1. distroless (最小 ~5MB, 纯静态binary) ──
-      - name: Build & push (distroless)
+      - name: Build ${{ matrix.desc }}
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile
-          target: distroless
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          target: ${{ matrix.target }}
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.id }}
           provenance: false
 
-      # ── 2. alpine (~8MB, 含 curl/ca-certificates) ──
-      - name: Build & push (alpine)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile
-          target: alpine
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}-alpine
-          labels: ${{ steps.meta.outputs.labels }}
-          provenance: false
-
-      # ── 3. busybox (~4MB, 含 shell, 资源受限环境推荐) ──
-      - name: Build & push (busybox)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile
-          target: busybox
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}-busybox
-          labels: ${{ steps.meta.outputs.labels }}
-          provenance: false
-
-      - name: Image summary
+      - name: Inspect ${{ matrix.desc }}
         run: |
-          echo "## 🐳 Docker images built" >> $GITHUB_STEP_SUMMARY
+          IMG="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.id }}"
+
+          BYTES=$(docker image inspect "$IMG" --format '{{.Size}}' 2>/dev/null || echo 0)
+          MB=$(python3 -c "print(f'{float($BYTES)/1024/1024:.1f}')" 2>/dev/null || echo "?")
+
+          echo "### ${{ matrix.desc }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo '| Variant | Tag | Base | Est. size | 推荐场景 |' >> $GITHUB_STEP_SUMMARY
-          echo '|---|---|---|---|---|' >> $GITHUB_STEP_SUMMARY
-          echo '| distroless | `${{ steps.meta.outputs.tags }}` | gcr.io/distroless/static | ~5MB | 生产默认 (CA证书+系统结构) |' >> $GITHUB_STEP_SUMMARY
-          echo '| alpine | `${{ steps.meta.outputs.tags }}-alpine` | alpine:3.20 | ~8MB | 需调试/诊断 (含sh+curl) |' >> $GITHUB_STEP_SUMMARY
-          echo '| busybox | `${{ steps.meta.outputs.tags }}-busybox` | busybox:glibc | ~4MB | 资源极度受限 |' >> $GITHUB_STEP_SUMMARY
+          echo "- **镜像大小**: $MB MB" >> $GITHUB_STEP_SUMMARY
+
+          # 检查 binary 是否可执行
+          if docker run --rm --entrypoint /usr/local/bin/ccm "$IMG" --version 2>/dev/null; then
+            echo "- **Binary**: ✅ ccm --version 正常" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Binary**: ❌ 启动失败" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # 检查有无 shell
+          if docker run --rm --entrypoint sh "$IMG" -c "echo shell-ok" 2>/dev/null | grep -q shell-ok; then
+            echo "- **Shell**: ✅ 有 sh" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Shell**: ❌ 无 shell" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # 检查 CA 证书
+          if docker run --rm --entrypoint sh "$IMG" -c "ls /etc/ssl/certs/ 2>/dev/null | head -1" 2>/dev/null | grep -q .; then
+            echo "- **CA 证书**: ✅ 有" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **CA 证书**: ❌ 无（HTTPS 可能失败）" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # ldd 检查
+          LDD=$(docker run --rm --entrypoint sh "$IMG" -c "ldd /usr/local/bin/ccm 2>&1" 2>/dev/null)
+          if echo "$LDD" | grep -q "not a dynamic executable"; then
+            echo "- **链接方式**: 🔒 静态链接 (musl)" >> $GITHUB_STEP_SUMMARY
+          elif [ -n "$LDD" ]; then
+            echo "- **链接方式**: 🔗 动态链接 (glibc)" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "$LDD" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **链接方式**: ? 无 shell 无法检查" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
