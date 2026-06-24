@@ -1,11 +1,12 @@
 # =============================================================
-# Stage 1: Build — Rust (Debian/glibc)
+# Stage 1: Build — Rust musl static binary
 # =============================================================
-FROM rust:slim-bookworm AS builder
+FROM rust:bookworm AS builder
 
 RUN apt-get update -qq && apt-get install -y -qq \
-    pkg-config libssl-dev cmake perl-modules && \
-    rm -rf /var/lib/apt/lists/*
+    musl-tools pkg-config libssl-dev cmake perl && \
+    rm -rf /var/lib/apt/lists/* && \
+    rustup target add x86_64-unknown-linux-musl
 
 WORKDIR /app
 COPY Cargo.toml ./
@@ -14,23 +15,32 @@ COPY benches ./benches
 COPY tests ./tests
 COPY config ./config
 
-RUN cargo build --release && \
-    cp target/release/ccm /app/ccm
+RUN cargo build --release --target x86_64-unknown-linux-musl && \
+    cp target/x86_64-unknown-linux-musl/release/ccm /app/ccm
 
 # =============================================================
-# Stage 2: distroless (glibc, ~15MB)
+# Stage 2: distroless/static (~5MB, no libc dependency)
 # =============================================================
-FROM gcr.io/distroless/cc-debian12:nonroot AS distroless
+FROM gcr.io/distroless/static-debian12:nonroot AS distroless
 COPY --from=builder /app/ccm /usr/local/bin/ccm
 EXPOSE 13456
 ENTRYPOINT ["ccm"]
 CMD ["start"]
 
 # =============================================================
-# Stage 3: alpine (glibc compat, ~20MB)
+# Stage 3: alpine (~8MB, with ca-certificates + curl)
 # =============================================================
 FROM alpine:3.20 AS alpine
-RUN apk add --no-cache ca-certificates curl libgcc gcompat
+RUN apk add --no-cache ca-certificates curl
+COPY --from=builder /app/ccm /usr/local/bin/ccm
+EXPOSE 13456
+ENTRYPOINT ["ccm"]
+CMD ["start"]
+
+# =============================================================
+# Stage 4: busybox (~3MB, literally just binary)
+# =============================================================
+FROM busybox:1.36-glibc AS busybox
 COPY --from=builder /app/ccm /usr/local/bin/ccm
 EXPOSE 13456
 ENTRYPOINT ["ccm"]
