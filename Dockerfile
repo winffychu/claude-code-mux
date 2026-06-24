@@ -9,7 +9,8 @@ RUN apt-get update -qq && apt-get install -y -qq \
     rustup target add x86_64-unknown-linux-musl
 
 WORKDIR /app
-COPY Cargo.toml ./
+COPY Cargo.toml statusline.sh ./
+COPY test_direct.sh test_litellm.sh test_routing.sh ./
 COPY src ./src
 COPY benches ./benches
 COPY tests ./tests
