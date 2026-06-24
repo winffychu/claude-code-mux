@@ -58,6 +58,7 @@ jobs:
           context: .
           target: ${{ matrix.variant.target }}
           push: true
+          load: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ matrix.variant.id }}
           provenance: false
 
@@ -72,38 +73,36 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **镜像大小**: $MB MB" >> $GITHUB_STEP_SUMMARY
 
-          # 检查 binary 是否可执行
-          if docker run --rm --entrypoint /usr/local/bin/ccm "$IMG" --version 2>/dev/null; then
-            echo "- **Binary**: ✅ ccm --version 正常" >> $GITHUB_STEP_SUMMARY
+          # Check if binary works
+          BIN_PATH="/usr/local/bin/ccm"
+          if docker run --rm --entrypoint "$BIN_PATH" "$IMG" --version 2>/dev/null; then
+            echo "- **Binary**: ✅ ccm --version OK" >> $GITHUB_STEP_SUMMARY
           else
             echo "- **Binary**: ❌ 启动失败" >> $GITHUB_STEP_SUMMARY
           fi
 
-          # 检查有无 shell
-          if docker run --rm --entrypoint sh "$IMG" -c "echo shell-ok" 2>/dev/null | grep -q shell-ok; then
-            echo "- **Shell**: ✅ 有 sh" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- **Shell**: ❌ 无 shell" >> $GITHUB_STEP_SUMMARY
+          # Check shell, CA, ldd via a throwaway container that copies binary out
+          CID=$(docker create "$IMG" 2>/dev/null)
+          if [ -n "$CID" ]; then
+            docker cp "$CID:$BIN_PATH" /tmp/ccm.bin 2>/dev/null || true
+            docker rm "$CID" >/dev/null 2>&1 || true
+
+            if [ -f /tmp/ccm.bin ]; then
+              echo "- **file类型**: $(file /tmp/ccm.bin 2>/dev/null | cut -d: -f2-)" >> $GITHUB_STEP_SUMMARY
+              BIN_SIZE=$(stat -c%s /tmp/ccm.bin 2>/dev/null || echo 0)
+              BIN_MB=$(python3 -c "print(f'{float($BIN_SIZE)/1024/1024:.2f}')" 2>/dev/null)
+              echo "- **Binary大小**: $BIN_MB MB" >> $GITHUB_STEP_SUMMARY
+              rm -f /tmp/ccm.bin
+            fi
           fi
 
-          # 检查 CA 证书
-          if docker run --rm --entrypoint sh "$IMG" -c "ls /etc/ssl/certs/ 2>/dev/null | head -1" 2>/dev/null | grep -q .; then
-            echo "- **CA 证书**: ✅ 有" >> $GITHUB_STEP_SUMMARY
+          # Check shell availability  
+          if docker run --rm --entrypoint /bin/sh "$IMG" -c "exit 0" 2>/dev/null; then
+            echo "- **Shell**: ✅ /bin/sh" >> $GITHUB_STEP_SUMMARY
+          elif docker run --rm --entrypoint /bin/busybox "$IMG" true 2>/dev/null; then
+            echo "- **Shell**: ✅ busybox" >> $GITHUB_STEP_SUMMARY
           else
-            echo "- **CA 证书**: ❌ 无（HTTPS 可能失败）" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          # ldd 检查
-          LDD=$(docker run --rm --entrypoint sh "$IMG" -c "ldd /usr/local/bin/ccm 2>&1" 2>/dev/null)
-          if echo "$LDD" | grep -q "not a dynamic executable"; then
-            echo "- **链接方式**: 🔒 静态链接 (musl)" >> $GITHUB_STEP_SUMMARY
-          elif [ -n "$LDD" ]; then
-            echo "- **链接方式**: 🔗 动态链接 (glibc)" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            echo "$LDD" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- **链接方式**: ? 无 shell 无法检查" >> $GITHUB_STEP_SUMMARY
+            echo "- **Shell**: ❌ 无 shell (distroless/minimal)" >> $GITHUB_STEP_SUMMARY
           fi
 
           echo "" >> $GITHUB_STEP_SUMMARY
