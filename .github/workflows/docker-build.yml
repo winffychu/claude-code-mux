@@ -62,9 +62,10 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          provenance: false
 
       - name: Build & push (alpine)
         uses: docker/build-push-action@v6
@@ -75,29 +76,16 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}-alpine
           labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Build & push (busybox)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile
-          target: busybox
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}-busybox
-          labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64,linux/arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          provenance: false
 
       - name: Image summary
         run: |
-          echo "## 🐳 Docker images built" >> $GITHUB_STEP_SUMMARY
+          echo "## Docker images built" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo '| Variant | Tags | Size | Base Image |' >> $GITHUB_STEP_SUMMARY
+          echo '| Variant | Tags | Size | Base |' >> $GITHUB_STEP_SUMMARY
           echo '|---|---|---|---|' >> $GITHUB_STEP_SUMMARY
-          echo '| distroless | `${{ steps.meta.outputs.tags }}` | ~8MB | gcr.io/distroless/static |' >> $GITHUB_STEP_SUMMARY
-          echo '| alpine | `${{ steps.meta.outputs.tags }}-alpine` | ~15MB | alpine:3.20 |' >> $GITHUB_STEP_SUMMARY
-          echo '| busybox | `${{ steps.meta.outputs.tags }}-busybox` | ~5MB | busybox:1.36-glibc |' >> $GITHUB_STEP_SUMMARY
+          echo '| distroless | `${{ steps.meta.outputs.tags }}` | ~15MB | gcr.io/distroless/cc-debian12 |' >> $GITHUB_STEP_SUMMARY
+          echo '| alpine | `${{ steps.meta.outputs.tags }}-alpine` | ~20MB | alpine:3.20 |' >> $GITHUB_STEP_SUMMARY
