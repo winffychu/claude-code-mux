@@ -1,18 +1,26 @@
 # Docker Compose for claude-code-mux
 # =====================================
-# 镜像说明:
-#   ghcr.io/winffychu/claude-code-mux:latest         ← distroless (~5MB, 生产推荐)
-#   ghcr.io/winffychu/claude-code-mux:latest-alpine  ← alpine (~10MB, 调试/诊断)
-#   ghcr.io/winffychu/claude-code-mux:latest-busybox ← busybox (~7MB, 资源受限)
 #
-# 使用方式:
-#   docker compose up -d                    # distroless (默认)
-#   docker compose up -d ccm-alpine         # alpine 变体
-#   docker compose run --rm ccm --version   # 查看版本
+# 镜像标签:
+#   ghcr.io/winffychu/claude-code-mux:latest         ← distroless (~5MB, 生产)
+#   ghcr.io/winffychu/claude-code-mux:latest-alpine  ← alpine  (~10MB, 调试)
+#   ghcr.io/winffychu/claude-code-mux:latest-busybox ← busybox (~7MB, 受限)
+#
+# 工作原理:
+#   ccm 读取 $HOME/.claude-code-mux/config.toml
+#   首次启动自动生成默认配置，编辑后重启即可。
+#   docker volume inspect ccm_data 可查看配置实际路径。
+#
+# 注意:
+#   distroless 镜像使用 nonroot 用户 (uid 65532),
+#   Docker 挂载的目录默认 root 属主, nonroot 无法写入。
+#   因此 distroless 变体需要 user: root 或预建目录。
+#   以下 distroless 采用 user: root 生产可行。
+#   若需 strict nonroot, 建议基于 Dockerfile 自行构建。
 # =====================================
 
 services:
-  # ── 默认: distroless (生产推荐, ~5MB) ──
+  # ── distroless (生产推荐, 无shell, 含CA证书) ──
   ccm:
     image: ghcr.io/winffychu/claude-code-mux:latest
     container_name: ccm
@@ -20,11 +28,11 @@ services:
     ports:
       - "13456:13456"
     volumes:
-      # 配置目录 (首次启动自动生成默认配置)
-      - ccm-config:/root/.claude-code-mux
+      - ccm_data:/config/.claude-code-mux
     environment:
+      - HOME=/config
       - RUST_LOG=info
-    # 健康检查: distroless 无 shell, 用 --version 代替
+    # distroless 无 shell, 用 binary 自检
     healthcheck:
       test: ["CMD", "/usr/local/bin/ccm", "--version"]
       interval: 30s
@@ -32,7 +40,7 @@ services:
       retries: 3
       start_period: 10s
 
-  # ── alpine 变体 (调试用, 含 sh+curl, ~10MB) ──
+  # ── alpine 变体 (调试诊断, sh+curl+CA) ──
   ccm-alpine:
     image: ghcr.io/winffychu/claude-code-mux:latest-alpine
     container_name: ccm-alpine
@@ -40,18 +48,17 @@ services:
     ports:
       - "13457:13456"
     volumes:
-      - ccm-config-alpine:/root/.claude-code-mux
+      - ccm_data_alpine:/root/.claude-code-mux
     environment:
       - RUST_LOG=debug
-    # alpine 有 shell, 可用 HTTP 检查
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:13456/api/config/json"]
+      test: ["CMD", "curl", "-sf", "http://localhost:13456/api/config/json"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 15s
 
-  # ── busybox 变体 (资源受限, ~7MB) ──
+  # ── busybox 变体 (资源受限, 无CA证书, HTTPS需用distroless) ──
   ccm-busybox:
     image: ghcr.io/winffychu/claude-code-mux:latest-busybox
     container_name: ccm-busybox
@@ -59,7 +66,7 @@ services:
     ports:
       - "13458:13456"
     volumes:
-      - ccm-config-busybox:/root/.claude-code-mux
+      - ccm_data_busybox:/root/.claude-code-mux
     environment:
       - RUST_LOG=warn
     healthcheck:
@@ -70,6 +77,6 @@ services:
       start_period: 10s
 
 volumes:
-  ccm-config:
-  ccm-config-alpine:
-  ccm-config-busybox:
+  ccm_data:
+  ccm_data_alpine:
+  ccm_data_busybox:
