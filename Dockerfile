@@ -38,11 +38,16 @@ EXPOSE 13456
 ENTRYPOINT ["ccm"]
 CMD ["start"]
 
-# =============================================================
-# Stage 4: busybox (~3MB, literally just binary)
-# =============================================================
+# ── Stage 4: busybox (~4MB, 含 shell 工具) ──
 FROM busybox:1.36-glibc AS busybox
 COPY --from=builder /app/ccm /usr/local/bin/ccm
 EXPOSE 13456
 ENTRYPOINT ["ccm"]
+CMD ["start"]
+
+# ── Stage 5: scratch — 真正最小 (仅 binary ~3MB) ──
+FROM scratch AS scratch
+COPY --from=builder /app/ccm /ccm
+EXPOSE 13456
+ENTRYPOINT ["/ccm"]
 CMD ["start"]
