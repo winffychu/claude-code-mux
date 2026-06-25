@@ -1,37 +1,42 @@
 # Docker Compose for claude-code-mux
 # =====================================
 #
-# 镜像标签:
-#   ghcr.io/winffychu/claude-code-mux:latest         ← distroless (~5MB, 生产)
-#   ghcr.io/winffychu/claude-code-mux:latest-alpine  ← alpine  (~10MB, 调试)
-#   ghcr.io/winffychu/claude-code-mux:latest-busybox ← busybox (~7MB, 受限)
+# ghcr.io/winffychu/claude-code-mux:latest          ← distroless (~5MB)
+# ghcr.io/winffychu/claude-code-mux:latest-alpine   ← alpine  (~10MB)
+# ghcr.io/winffychu/claude-code-mux:latest-busybox  ← busybox (~7MB)
 #
-# 配置路径: $HOME/.claude-code-mux/config.toml
-#   首次启动自动创建默认配置。
-#   编辑后重启: docker compose restart ccm
+# ccm 配置: $HOME/.claude-code-mux/config.toml (首次自动创建)
 #
 # 权限说明:
-#   distroless 使用 nonroot (uid 65532), HOME=/home/nonroot
-#     镜像内已预建 /home/nonroot/.claude-code-mux 并 chown 给 65532
-#     首次启动无需 volume 也能写默认配置。
-#     Docker named volume 默认 root 属主, nonroot 写入需:
-#       a) 先运行一次初始化: docker compose run --rm -u root ccm chown 65532:65532 /home/nonroot/.claude-code-mux
-#       b) 或绑定挂载宿主目录: ./ccm_data:/home/nonroot/.claude-code-mux (宿主目录 chown 65532)
-#       本文件使用 user: root 方案 (docker 层面隔离, distroless 无 shell/suid 攻击面为零)
-#   alpine/busybox 以 root 运行, 无此问题。
+#   distroless 镜像运行在 nonroot (uid 65532), HOME=/home/nonroot
+#   Docker named volume 默认 root 属主 → nonroot 写不了。
+#   因此 distroless 有两种方式:
+#
+#     ┌────────────────────────────────────────────────────┐
+#     │ 方式 A (推荐): bind mount — 真 nonroot            │
+#     │   docker compose up -d                            │
+#     │   首次: mkdir -p ccm_config                       │
+#     │         docker run --rm -v $PWD/ccm_config:/tmp \  │
+#     │           alpine chown 65532:65532 /tmp            │
+#     ├────────────────────────────────────────────────────┤
+#     │ 方式 B: named volume + user:root — 省事          │
+#     │   docker compose --profile root up -d             │
+#     │   distroless 无 shell/suid, root 依旧安全         │
+#     └────────────────────────────────────────────────────┘
+#
+#   alpine/busybox 默认 root, 不存在此问题。
 # =====================================
 
 services:
-  # ── distroless (生产推荐, 无shell, 含CA证书, ~5MB) ──
+  # ── distroless — bind mount (真 nonroot) ──
   ccm:
     image: ghcr.io/winffychu/claude-code-mux:latest
     container_name: ccm
-    user: root
     restart: unless-stopped
     ports:
       - "13456:13456"
     volumes:
-      - ccm_data:/home/nonroot/.claude-code-mux
+      - ./ccm_config:/home/nonroot/.claude-code-mux
     environment:
       - RUST_LOG=info
     healthcheck:
@@ -41,15 +46,36 @@ services:
       retries: 3
       start_period: 10s
 
-  # ── alpine 变体 (调试诊断, sh+curl+CA, ~10MB) ──
-  ccm-alpine:
-    image: ghcr.io/winffychu/claude-code-mux:latest-alpine
-    container_name: ccm-alpine
+  # ── distroless — named volume + root (省事) ──
+  ccm-root:
+    image: ghcr.io/winffychu/claude-code-mux:latest
+    container_name: ccm-root
+    profiles: [root]
+    user: root
     restart: unless-stopped
     ports:
       - "13457:13456"
     volumes:
-      - ccm_data_alpine:/root/.claude-code-mux
+      - ccm_root_data:/home/nonroot/.claude-code-mux
+    environment:
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/ccm", "--version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── alpine (调试诊断) ──
+  ccm-alpine:
+    image: ghcr.io/winffychu/claude-code-mux:latest-alpine
+    container_name: ccm-alpine
+    profiles: [alpine]
+    restart: unless-stopped
+    ports:
+      - "13458:13456"
+    volumes:
+      - ccm_alpine_data:/root/.claude-code-mux
     environment:
       - RUST_LOG=debug
     healthcheck:
@@ -59,15 +85,16 @@ services:
       retries: 3
       start_period: 15s
 
-  # ── busybox 变体 (资源受限, 无CA, ~7MB) ──
+  # ── busybox (资源受限) ──
   ccm-busybox:
     image: ghcr.io/winffychu/claude-code-mux:latest-busybox
     container_name: ccm-busybox
+    profiles: [busybox]
     restart: unless-stopped
     ports:
-      - "13458:13456"
+      - "13459:13456"
     volumes:
-      - ccm_data_busybox:/root/.claude-code-mux
+      - ccm_busybox_data:/root/.claude-code-mux
     environment:
       - RUST_LOG=warn
     healthcheck:
@@ -78,6 +105,6 @@ services:
       start_period: 10s
 
 volumes:
-  ccm_data:
-  ccm_data_alpine:
-  ccm_data_busybox:
+  ccm_root_data:
+  ccm_alpine_data:
+  ccm_busybox_data:
