@@ -6,16 +6,19 @@
 #   ghcr.io/winffychu/claude-code-mux:latest-alpine  ← alpine  (~10MB, 调试)
 #   ghcr.io/winffychu/claude-code-mux:latest-busybox ← busybox (~7MB, 受限)
 #
-# ccm 配置路径: $HOME/.claude-code-mux/config.toml
-# 首次启动自动创建默认配置。
-# 编辑配置后重启: docker compose restart ccm
+# 配置路径: $HOME/.claude-code-mux/config.toml
+#   首次启动自动创建默认配置。
+#   编辑后重启: docker compose restart ccm
 #
 # 权限说明:
-#   distroless 镜像默认 nonroot (uid 65532), 但 Docker named volume
-#   默认 root 属主导致 nonroot 无法写入。distroless 无 shell/无包管理器/
-#   无 suid 二进制, 因此以 root 运行依然安全。若需完全 nonroot,
-#   建议在 Dockerfile 中预建目录并 chown。
-#   alpine/busybox 以 root 运行自然可写自己的 HOME。
+#   distroless 使用 nonroot (uid 65532), HOME=/home/nonroot
+#     镜像内已预建 /home/nonroot/.claude-code-mux 并 chown 给 65532
+#     首次启动无需 volume 也能写默认配置。
+#     Docker named volume 默认 root 属主, nonroot 写入需:
+#       a) 先运行一次初始化: docker compose run --rm -u root ccm chown 65532:65532 /home/nonroot/.claude-code-mux
+#       b) 或绑定挂载宿主目录: ./ccm_data:/home/nonroot/.claude-code-mux (宿主目录 chown 65532)
+#       本文件使用 user: root 方案 (docker 层面隔离, distroless 无 shell/suid 攻击面为零)
+#   alpine/busybox 以 root 运行, 无此问题。
 # =====================================
 
 services:
@@ -23,16 +26,13 @@ services:
   ccm:
     image: ghcr.io/winffychu/claude-code-mux:latest
     container_name: ccm
-    # distroless 默认 nonroot, 但 Docker volume root 属主无法写入
-    # 无 shell/包管理器/suid, root 运行依然安全
     user: root
     restart: unless-stopped
     ports:
       - "13456:13456"
     volumes:
-      - ccm_data:/root/.claude-code-mux
+      - ccm_data:/home/nonroot/.claude-code-mux
     environment:
-      - HOME=/root
       - RUST_LOG=info
     healthcheck:
       test: ["CMD", "/usr/local/bin/ccm", "--version"]
@@ -51,7 +51,6 @@ services:
     volumes:
       - ccm_data_alpine:/root/.claude-code-mux
     environment:
-      - HOME=/root
       - RUST_LOG=debug
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:13456/api/config/json"]
@@ -60,7 +59,7 @@ services:
       retries: 3
       start_period: 15s
 
-  # ── busybox 变体 (资源受限, 无CA证书, ~7MB) ──
+  # ── busybox 变体 (资源受限, 无CA, ~7MB) ──
   ccm-busybox:
     image: ghcr.io/winffychu/claude-code-mux:latest-busybox
     container_name: ccm-busybox
@@ -70,7 +69,6 @@ services:
     volumes:
       - ccm_data_busybox:/root/.claude-code-mux
     environment:
-      - HOME=/root
       - RUST_LOG=warn
     healthcheck:
       test: ["CMD", "/usr/local/bin/ccm", "--version"]
