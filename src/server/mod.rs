@@ -323,8 +323,11 @@ button:hover{background:#1b64da}
 (async function(){
 var k=sessionStorage.getItem('ccm_admin_key');
 if(k){
+var probe=await fetch('/api/config/json',{headers:{'x-admin-key':k}});
+if(probe.ok){
 var r=await fetch('/',{headers:{'x-admin-key':k}});
-if(r.ok&&!r.url.endsWith('/login')){document.write(await r.text());document.close();return}
+document.write(await r.text());document.close();return;
+}
 sessionStorage.removeItem('ccm_admin_key');
 }
 document.getElementById('login-form').style.display='block';
@@ -1209,3 +1212,143 @@ impl std::fmt::Display for AppError {
 }
 
 impl std::error::Error for AppError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderMap;
+    use crate::cli::{RouterConfig, ServerConfig};
+
+    fn make_config(api_key: Option<&str>, admin_password: Option<&str>) -> AppConfig {
+        AppConfig {
+            server: ServerConfig {
+                api_key: api_key.map(|s| s.to_string()),
+                admin_password: admin_password.map(|s| s.to_string()),
+                ..Default::default()
+            },
+            router: RouterConfig {
+                default: "test".into(),
+                background: None,
+                think: None,
+                websearch: None,
+                auto_map_regex: None,
+                background_regex: None,
+                prompt_rules: vec![],
+            },
+            providers: vec![],
+            models: vec![],
+        }
+    }
+
+    fn make_headers(kv: Vec<(&str, &str)>) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in kv {
+            h.insert(k.parse().unwrap(), v.parse().unwrap());
+        }
+        h
+    }
+
+    // ── check_api_key ──
+
+    #[test]
+    fn test_api_key_not_configured_allows_all() {
+        let cfg = make_config(None, None);
+        let h = make_headers(vec![]);
+        assert!(check_api_key(&cfg, &h).is_ok());
+    }
+
+    #[test]
+    fn test_api_key_empty_allows_all() {
+        let cfg = make_config(Some(""), None);
+        let h = make_headers(vec![]);
+        assert!(check_api_key(&cfg, &h).is_ok());
+    }
+
+    #[test]
+    fn test_api_key_valid_via_x_api_key() {
+        let cfg = make_config(Some("sk-123456"), None);
+        let h = make_headers(vec![("x-api-key", "sk-123456")]);
+        assert!(check_api_key(&cfg, &h).is_ok());
+    }
+
+    #[test]
+    fn test_api_key_valid_via_bearer() {
+        let cfg = make_config(Some("sk-123456"), None);
+        let h = make_headers(vec![("authorization", "Bearer sk-123456")]);
+        assert!(check_api_key(&cfg, &h).is_ok());
+    }
+
+    #[test]
+    fn test_api_key_invalid_rejected() {
+        let cfg = make_config(Some("sk-123456"), None);
+        let h = make_headers(vec![("x-api-key", "sk-wrong")]);
+        assert!(check_api_key(&cfg, &h).is_err());
+    }
+
+    #[test]
+    fn test_api_key_missing_rejected() {
+        let cfg = make_config(Some("sk-123456"), None);
+        let h = make_headers(vec![]);
+        assert!(check_api_key(&cfg, &h).is_err());
+    }
+
+    #[test]
+    fn test_api_key_is_pure_auth_not_forwarded() {
+        // verify the function only checks auth, doesn't modify headers or config
+        let cfg = make_config(Some("sk-123456"), None);
+        let h = make_headers(vec![("x-api-key", "sk-123456")]);
+        assert!(check_api_key(&cfg, &h).is_ok());
+        // headers unchanged
+        assert_eq!(h.get("x-api-key").unwrap(), "sk-123456");
+        // api_key not changed
+        assert_eq!(cfg.server.api_key.as_deref(), Some("sk-123456"));
+    }
+
+    // ── check_admin_auth ──
+
+    #[test]
+    fn test_admin_auth_not_configured_allows_all() {
+        let cfg = make_config(None, None);
+        let h = make_headers(vec![]);
+        assert!(check_admin_auth(&cfg, &h).is_ok());
+    }
+
+    #[test]
+    fn test_admin_auth_valid_key() {
+        let cfg = make_config(None, Some("admin"));
+        let h = make_headers(vec![("x-admin-key", "admin")]);
+        assert!(check_admin_auth(&cfg, &h).is_ok());
+    }
+
+    #[test]
+    fn test_admin_auth_invalid_key() {
+        let cfg = make_config(None, Some("admin"));
+        let h = make_headers(vec![("x-admin-key", "wrong")]);
+        assert!(check_admin_auth(&cfg, &h).is_err());
+    }
+
+    #[test]
+    fn test_admin_auth_no_header() {
+        let cfg = make_config(None, Some("admin"));
+        let h = make_headers(vec![]);
+        assert!(check_admin_auth(&cfg, &h).is_err());
+    }
+
+    // ── AppError types ──
+
+    #[test]
+    fn test_unauthorized_error_has_401_status() {
+        let err = AppError::Unauthorized("test".into());
+        let resp = err.into_response();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn test_api_key_error_message() {
+        let cfg = make_config(Some("sk-123456"), None);
+        let h = make_headers(vec![]);
+        let err = check_api_key(&cfg, &h).unwrap_err();
+        let msg = format!("{}", err);
+        assert!(msg.contains("Unauthorized"), "got: {}", msg);
+    }
+}
