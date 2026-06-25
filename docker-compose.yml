@@ -23,6 +23,9 @@ services:
   ccm:
     image: ghcr.io/winffychu/claude-code-mux:latest
     container_name: ccm
+    # distroless 默认 nonroot, 但 Docker volume root 属主无法写入
+    # 无 shell/包管理器/suid, root 运行依然安全
+    user: root
     restart: unless-stopped
     ports:
       - "13456:13456"
