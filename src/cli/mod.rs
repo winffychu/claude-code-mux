@@ -23,6 +23,9 @@ pub struct ServerConfig {
     #[serde(default = "default_host")]
     pub host: String,
     pub api_key: Option<String>,
+    /// Admin web UI password (default: no auth). Set to enable password protection.
+    #[serde(default)]
+    pub admin_password: Option<String>,
     #[serde(default = "default_log_level")]
     pub log_level: String,
     #[serde(default)]
@@ -67,6 +70,7 @@ impl Default for ServerConfig {
             port: default_port(),
             host: default_host(),
             api_key: None,
+            admin_password: None,
             log_level: default_log_level(),
             timeouts: TimeoutConfig::default(),
             tracing: TracingConfig::default(),
@@ -254,6 +258,15 @@ host = "127.0.0.1"
 port = 13456
 log_level = "info"
 
+# API key for incoming /v1/* requests (Claude Code / Codex connections)
+# If set, clients must include x-api-key: <your-key> or Authorization: Bearer <your-key>
+# Default: no key required (anyone can connect)
+# api_key = "sk-123456"
+
+# Admin web UI password
+# If set, admin page requires login. Default admin/admin when set.
+# admin_password = "admin"
+
 [server.timeouts]
 api_timeout_ms = 600000      # 10 minutes
 connect_timeout_ms = 10000   # 10 seconds
@@ -322,6 +335,14 @@ default = "placeholder-model"
             if key.starts_with('$') {
                 let env_var = &key[1..];
                 self.server.api_key = std::env::var(env_var).ok();
+            }
+        }
+
+        // Resolve admin password from env var
+        if let Some(ref pw) = self.server.admin_password {
+            if pw.starts_with('$') {
+                let env_var = &pw[1..];
+                self.server.admin_password = std::env::var(env_var).ok();
             }
         }
 
