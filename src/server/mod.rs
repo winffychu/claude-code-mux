@@ -263,9 +263,73 @@ pub async fn start_server(config: AppConfig, config_path: std::path::PathBuf) ->
 }
 
 /// Serve Admin UI
-async fn serve_admin() -> impl IntoResponse {
-    Html(include_str!("admin.html"))
+/// If admin_password is set in config, serves a minimal login page
+/// unless x-admin-key header matches. Once authenticated, serves full admin.html.
+async fn serve_admin(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
+    let inner = state.snapshot();
+
+    // Check if admin_password is configured
+    if inner.config.server.admin_password.is_some() {
+        let pw = inner.config.server.admin_password.as_deref().unwrap_or("");
+        if !pw.is_empty() {
+            // Check x-admin-key header
+            let authed = headers
+                .get("x-admin-key")
+                .and_then(|v| v.to_str().ok())
+                .map(|v| v == pw)
+                .unwrap_or(false);
+
+            if !authed {
+                return Html(ADMIN_LOGIN_PAGE).into_response();
+            }
+        }
+    }
+
+    Html(include_str!("admin.html")).into_response()
 }
+
+/// Minimal login page shown when admin_password is configured
+const ADMIN_LOGIN_PAGE: &str = r#"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>CCM Login</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,system-ui,Roboto,sans-serif}
+body{background:#111318;color:#e6e8ea;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.card{background:#1a1d24;border-radius:16px;padding:40px;width:340px;box-shadow:0 4px 24px rgba(0,0,0,.4)}
+h1{font-size:22px;font-weight:700;margin-bottom:4px}
+p{color:#8b95a1;font-size:14px;margin-bottom:24px}
+input{width:100%;padding:14px 18px;border:1.5px solid #2a2d35;border-radius:10px;font-size:15px;background:#14171c;color:#e6e8ea;outline:none;transition:border-color .2s;margin-bottom:16px}
+input:focus{border-color:#3182f6}
+button{width:100%;padding:14px;border:none;border-radius:10px;font-size:15px;font-weight:600;background:#3182f6;color:#fff;cursor:pointer;transition:background .2s}
+button:hover{background:#1b64da}
+.error{color:#ef4444;font-size:13px;margin-top:12px;display:none}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>Claude Code Mux</h1>
+<p>Enter admin password</p>
+<input type="password" id="pw" placeholder="Password" autofocus onkeydown="if(event.key==='Enter')login()">
+<button onclick="login()">Login</button>
+<div class="error" id="err">Invalid password</div>
+</div>
+<script>
+async function login(){
+const pw=document.getElementById('pw').value;
+const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});
+const d=await r.json();
+if(d.success){sessionStorage.setItem('ccm_admin_key',pw);window.location.href='/'}
+else document.getElementById('err').style.display='block'}
+if(sessionStorage.getItem('ccm_admin_key'))window.location.href='/?check'
+</script>
+</body>
+</html>"#;
 
 /// Health check endpoint
 async fn health_check() -> impl IntoResponse {
