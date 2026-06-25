@@ -188,17 +188,8 @@
         <meta name="theme-color" content="#f9fafb" media="(prefers-color-scheme: light)">
     </head>
     <body>
-        <!-- Login overlay (hidden by default) -->
-        <div id="login-overlay" class="hidden fixed inset-0 z-50 flex items-center justify-center" style="background: rgba(0,0,0,0.6);">
-            <div class="card p-8 w-full max-w-sm mx-4">
-                <h1 class="text-2xl font-bold mb-2">Claude Code Mux</h1>
-                <p class="text-sm mb-6" style="color:var(--text-secondary);">Enter admin password</p>
-                <input type="password" id="login-password" placeholder="Password"
-                    class="input-field mb-4" onkeydown="if(event.key==='Enter') doLogin()">
-                <button onclick="doLogin()" class="btn-primary w-full">Login</button>
-                <div id="login-error" class="hidden mt-3 text-sm text-red-500"></div>
-            </div>
-        </div>
+        <!-- Note: admin auth is handled server-side. If admin_password is set in config,
+             the server serves a minimal login page before showing this page. -->
         <div class="flex min-h-screen">
             <!-- Sidebar Navigation -->
             <aside
@@ -4151,12 +4142,6 @@ strip_match = false             # strip matched phrase (default: false)</pre>
 
             // Initialize
             window.addEventListener("DOMContentLoaded", async () => {
-                // Check if auth is needed — quick probe
-                const probe = await fetch("/api/config/json", { method: "GET" });
-                if (probe.status === 401) {
-                    document.getElementById("login-overlay").classList.remove("hidden");
-                    return; // Stop init, wait for login
-                }
                 await loadConfig();
                 handleRoute();
                 renderOverview();
@@ -4181,26 +4166,8 @@ strip_match = false             # strip matched phrase (default: false)</pre>
             window.addEventListener("popstate", handleRoute);
 
             // ── Auth ──
+            // Key stored by server login page, passed to all API calls
             const ADMIN_KEY = sessionStorage.getItem("ccm_admin_key") || "";
-
-            async function doLogin() {
-                const pw = document.getElementById("login-password").value;
-                const resp = await fetch("/api/login", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ password: pw }),
-                });
-                const data = await resp.json();
-                if (data.success) {
-                    sessionStorage.setItem("ccm_admin_key", pw);
-                    document.getElementById("login-overlay").classList.add("hidden");
-                    location.reload();
-                } else {
-                    const err = document.getElementById("login-error");
-                    err.textContent = "Invalid password";
-                    err.classList.remove("hidden");
-                }
-            }
 
             // ── i18n ──
             const I18N = {
@@ -4212,8 +4179,6 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                     "Settings": "设置",
                     "Routing Status": "路由状态",
                     "Monitor your AI routing configuration": "监控 AI 路由配置",
-                    "Providers": "提供商",
-                    "Models": "模型",
                     "Status": "状态",
                     "Active": "活跃",
                     "Router Configuration": "路由器配置",
@@ -4238,14 +4203,8 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                     "Configure model routing and provider mappings": "配置模型路由和 Provider 映射",
                     "Save": "保存",
                     "Last saved": "上次保存",
-                    "Enter admin password": "输入管理员密码",
-                    "Login": "登录",
-                    "Invalid password": "密码错误",
-                    "Password": "密码",
                     "Edit": "编辑",
                     "Delete": "删除",
-                    "Active": "活跃",
-                    "Admin": "管理",
                     "Provider Type": "Provider 类型",
                     "API Format": "API 格式",
                     "API Key": "API 密钥",
@@ -4267,9 +4226,29 @@ strip_match = false             # strip matched phrase (default: false)</pre>
             }
 
             function applyLang() {
-                document.querySelectorAll("[data-i18n]").forEach(el => {
-                    el.textContent = t(el.getAttribute("data-i18n"));
-                });
+                // Walk all text nodes and replace known strings
+                const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+                const texts = [];
+                while (walker.nextNode()) texts.push(walker.currentNode);
+                for (const node of texts) {
+                    const orig = node.nodeValue;
+                    if (!orig || !orig.trim()) continue;
+                    let changed = false;
+                    for (const [en, zh] of Object.entries(I18N.zh)) {
+                        if (!en || en.length < 3) continue;
+                        const target = currentLang === "zh" ? zh : en;
+                        const source = currentLang === "zh" ? en : zh;
+                        if (orig.includes(source)) {
+                            node.nodeValue = orig.replace(new RegExp(source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), target);
+                            changed = true;
+                        }
+                    }
+                    // Pure translation mode: if still english and zh is active, translate full text
+                    if (!changed && currentLang === "zh" && I18N.zh[orig.trim()]) {
+                        node.nodeValue = I18N.zh[orig.trim()];
+                    }
+                }
+                // Update toggle button
                 document.getElementById("lang-toggle").textContent =
                     currentLang === "zh" ? "🇬🇧 English" : "🇨🇳 中文";
                 document.documentElement.lang = currentLang === "zh" ? "zh-CN" : "en";
@@ -4278,7 +4257,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
             function toggleLang() {
                 currentLang = currentLang === "zh" ? "en" : "zh";
                 localStorage.setItem("ccm_lang", currentLang);
-                applyLang();
+                location.reload(); // Full reload to re-translate all DOM
             }
 
             // ── Theme ──
@@ -4305,17 +4284,17 @@ strip_match = false             # strip matched phrase (default: false)</pre>
             window.fetch = function(url, opts = {}) {
                 opts = opts || {};
                 opts.headers = opts.headers || {};
-                if (ADMIN_KEY && typeof url === "string" && (url.startsWith("/api/") || url.startsWith("/health"))) {
-                    opts.headers["x-admin-key"] = ADMIN_KEY;
+                if (typeof url === "string" && url.startsWith("/api/")) {
+                    if (ADMIN_KEY) opts.headers["x-admin-key"] = ADMIN_KEY;
                 }
                 return origFetch.call(window, url, opts);
             };
 
             // Init theme + lang on load
             applyTheme();
-            applyLang();
+            if (currentLang === "zh") setTimeout(applyLang, 100);
 
-            // Re-apply theme on system preference change
+            // Re-apply on system preference change
             window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
         </script>
     </body>
