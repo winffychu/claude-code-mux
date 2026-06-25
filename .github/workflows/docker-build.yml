@@ -13,6 +13,14 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run cargo test
+        run: cargo test -- --nocapture
+
   build:
     runs-on: ubuntu-latest
     permissions:
