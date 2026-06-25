@@ -1241,9 +1241,10 @@ mod tests {
     }
 
     fn make_headers(kv: Vec<(&str, &str)>) -> HeaderMap {
+        use axum::http::HeaderName;
         let mut h = HeaderMap::new();
         for (k, v) in kv {
-            h.insert(k.parse().unwrap(), v.parse().unwrap());
+            h.insert(HeaderName::from_bytes(k.as_bytes()).unwrap(), v.parse().unwrap());
         }
         h
     }
@@ -1294,12 +1295,13 @@ mod tests {
 
     #[test]
     fn test_api_key_is_pure_auth_not_forwarded() {
+        use axum::http::HeaderName;
         // verify the function only checks auth, doesn't modify headers or config
         let cfg = make_config(Some("sk-123456"), None);
         let h = make_headers(vec![("x-api-key", "sk-123456")]);
         assert!(check_api_key(&cfg, &h).is_ok());
         // headers unchanged
-        assert_eq!(h.get("x-api-key").unwrap(), "sk-123456");
+        assert_eq!(h.get(&HeaderName::from_static("x-api-key")).unwrap(), "sk-123456");
         // api_key not changed
         assert_eq!(cfg.server.api_key.as_deref(), Some("sk-123456"));
     }
