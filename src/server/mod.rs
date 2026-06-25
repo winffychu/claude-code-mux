@@ -312,7 +312,7 @@ button:hover{background:#1b64da}
 </style>
 </head>
 <body>
-<div class="card">
+<div class="card" id="login-form" style="display:none">
 <h1>Claude Code Mux</h1>
 <p>Enter admin password</p>
 <input type="password" id="pw" placeholder="Password" autofocus onkeydown="if(event.key==='Enter')login()">
@@ -320,13 +320,24 @@ button:hover{background:#1b64da}
 <div class="error" id="err">Invalid password</div>
 </div>
 <script>
+(async function(){
+var k=sessionStorage.getItem('ccm_admin_key');
+if(k){
+var r=await fetch('/',{headers:{'x-admin-key':k}});
+if(r.ok&&!r.url.endsWith('/login')){document.write(await r.text());document.close();return}
+sessionStorage.removeItem('ccm_admin_key');
+}
+document.getElementById('login-form').style.display='block';
+})();
 async function login(){
-const pw=document.getElementById('pw').value;
-const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});
-const d=await r.json();
-if(d.success){sessionStorage.setItem('ccm_admin_key',pw);window.location.href='/'}
-else document.getElementById('err').style.display='block'}
-if(sessionStorage.getItem('ccm_admin_key'))window.location.href='/?check'
+var pw=document.getElementById('pw').value;
+var r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});
+var d=await r.json();
+if(d.success){
+sessionStorage.setItem('ccm_admin_key',pw);
+var resp=await fetch('/',{headers:{'x-admin-key':pw}});
+document.write(await resp.text());document.close();
+}else document.getElementById('err').style.display='block'}
 </script>
 </body>
 </html>"#;
