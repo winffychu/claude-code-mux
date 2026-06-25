@@ -93,6 +93,74 @@ fn write_routing_info(model: &str, provider: &str, route_type: &RouteType) {
     }
 }
 
+// ── Auth helpers ──
+
+/// Check API key for /v1/* requests.
+/// Returns Ok(()) if no key configured, or if key matches x-api-key or Authorization header.
+fn check_api_key(config: &AppConfig, headers: &HeaderMap) -> Result<(), AppError> {
+    let Some(ref expected) = config.server.api_key else {
+        return Ok(()); // No key configured = allow all
+    };
+    if expected.is_empty() {
+        return Ok(());
+    }
+
+    // Check x-api-key header
+    if let Some(val) = headers.get("x-api-key").and_then(|v| v.to_str().ok()) {
+        if val == expected {
+            return Ok(());
+        }
+    }
+
+    // Check Authorization: Bearer <key>
+    if let Some(val) = headers.get("authorization").and_then(|v| v.to_str().ok()) {
+        if val == format!("Bearer {}", expected) || val == format!("bearer {}", expected) {
+            return Ok(());
+        }
+        if val == expected {
+            return Ok(());
+        }
+    }
+
+    Err(AppError::Unauthorized("Invalid or missing API key. Provide via x-api-key header or Authorization: Bearer <key>.".into()))
+}
+
+/// Check admin password for web UI / API endpoints.
+/// Returns Ok(()) if no password configured, or if x-admin-key header matches.
+fn check_admin_auth(config: &AppConfig, headers: &HeaderMap) -> Result<(), AppError> {
+    let Some(ref expected) = config.server.admin_password else {
+        return Ok(()); // No password configured = allow all
+    };
+    if expected.is_empty() {
+        return Ok(());
+    }
+
+    if let Some(val) = headers.get("x-admin-key").and_then(|v| v.to_str().ok()) {
+        if val == expected {
+            return Ok(());
+        }
+    }
+
+    Err(AppError::Unauthorized("Invalid admin password. Provide via x-admin-key header.".into()))
+}
+
+/// Login endpoint — validates admin password, returns JSON.
+async fn login_handler(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let password = body.get("password").and_then(|v| v.as_str()).unwrap_or("");
+    let inner = state.snapshot();
+    let expected = inner.config.server.admin_password.as_deref().unwrap_or("admin");
+
+    if password == expected || password == "admin" && expected == "admin" {
+        Json(serde_json::json!({ "success": true })).into_response()
+    } else {
+        let resp = Json(serde_json::json!({ "success": false, "error": "Invalid password" }));
+        (StatusCode::UNAUTHORIZED, resp).into_response()
+    }
+}
+
 /// Start the HTTP server
 pub async fn start_server(config: AppConfig, config_path: std::path::PathBuf) -> anyhow::Result<()> {
     let router = Router::new(config.clone());
@@ -151,7 +219,9 @@ pub async fn start_server(config: AppConfig, config_path: std::path::PathBuf) ->
         .route("/auth/callback", get(oauth_handlers::oauth_callback))  // OpenAI Codex uses this path
         .route("/api/oauth/tokens", get(oauth_handlers::oauth_list_tokens))
         .route("/api/oauth/tokens/delete", post(oauth_handlers::oauth_delete_token))
-        .route("/api/oauth/tokens/refresh", post(oauth_handlers::oauth_refresh_token));
+        .route("/api/oauth/tokens/refresh", post(oauth_handlers::oauth_refresh_token))
+        // Admin login (validates password, returns simple JSON)
+        .route("/api/login", post(login_handler));
 
     // Clone state before moving it
     let oauth_state = state.clone();
@@ -206,8 +276,14 @@ async fn health_check() -> impl IntoResponse {
 }
 
 /// Get full configuration as JSON (for admin UI)
-async fn get_config_json(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+async fn get_config_json(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
     let inner = state.snapshot();
+    if let Err(e) = check_admin_auth(&inner.config, &headers) {
+        return e.into_response();
+    }
     Json(serde_json::json!({
         "server": {
             "host": inner.config.server.host,
@@ -248,8 +324,11 @@ fn remove_null_values(value: &mut serde_json::Value) {
 /// Update configuration via JSON (for admin UI)
 async fn update_config_json(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(mut new_config): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    let inner = state.snapshot();
+    check_admin_auth(&inner.config, &headers)?;
     // Remove null values (TOML doesn't support null)
     remove_null_values(&mut new_config);
 
@@ -332,8 +411,18 @@ async fn update_config_json(
 }
 
 /// Reload configuration without restarting the server
-async fn reload_config(State(state): State<Arc<AppState>>) -> Response {
+async fn reload_config(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
     info!("🔄 Configuration reload requested via UI");
+
+    // Check admin auth
+    let inner = state.snapshot();
+    if let Err(e) = check_admin_auth(&inner.config, &headers) {
+        return e.into_response();
+    }
+    drop(inner);
 
     // 1. Read and parse new config (all sync, no locks held)
     let config_str = match std::fs::read_to_string(&state.config_path) {
@@ -396,6 +485,9 @@ async fn handle_openai_chat_completions(
 
     // Get snapshot of reloadable state
     let inner = state.snapshot();
+
+    // Check API key auth
+    check_api_key(&inner.config, &headers)?;
 
     // Streaming is not supported for /v1/chat/completions
     if openai_request.stream == Some(true) {
@@ -620,6 +712,9 @@ async fn handle_messages(
 
     // Get snapshot of reloadable state
     let inner = state.snapshot();
+
+    // Check API key auth
+    check_api_key(&inner.config, &headers)?;
 
     // Generate trace ID for correlating request/response
     let trace_id = state.message_tracer.new_trace_id();
@@ -881,6 +976,7 @@ async fn handle_messages(
 /// Handle /v1/messages/count_tokens requests
 async fn handle_count_tokens(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(request_json): Json<serde_json::Value>,
 ) -> Result<Response, AppError> {
     let model = request_json.get("model").and_then(|m| m.as_str()).unwrap_or("unknown");
@@ -888,6 +984,9 @@ async fn handle_count_tokens(
 
     // Get snapshot of reloadable state
     let inner = state.snapshot();
+
+    // Check API key auth
+    check_api_key(&inner.config, &headers)?;
 
     // 1. Parse as CountTokensRequest first
     use crate::models::CountTokensRequest;
@@ -1000,6 +1099,7 @@ pub enum AppError {
     RoutingError(String),
     ParseError(String),
     ProviderError(String),
+    Unauthorized(String),
 }
 
 impl IntoResponse for AppError {
@@ -1008,6 +1108,7 @@ impl IntoResponse for AppError {
             AppError::RoutingError(msg) => (StatusCode::BAD_REQUEST, msg),
             AppError::ParseError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
             AppError::ProviderError(msg) => (StatusCode::BAD_GATEWAY, msg),
+            AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg),
         };
 
         let body = Json(serde_json::json!({
@@ -1027,6 +1128,7 @@ impl std::fmt::Display for AppError {
             AppError::RoutingError(msg) => write!(f, "Routing error: {}", msg),
             AppError::ParseError(msg) => write!(f, "Parse error: {}", msg),
             AppError::ProviderError(msg) => write!(f, "Provider error: {}", msg),
+            AppError::Unauthorized(msg) => write!(f, "Unauthorized: {}", msg),
         }
     }
 }
