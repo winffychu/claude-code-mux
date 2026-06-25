@@ -275,11 +275,10 @@ async fn health_check() -> impl IntoResponse {
     }))
 }
 
-/// Get full configuration as JSON (for admin UI)
 async fn get_config_json(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-) -> impl IntoResponse {
+) -> Response {
     let inner = state.snapshot();
     if let Err(e) = check_admin_auth(&inner.config, &headers) {
         return e.into_response();
@@ -288,6 +287,7 @@ async fn get_config_json(
         "server": {
             "host": inner.config.server.host,
             "port": inner.config.server.port,
+            "log_level": inner.config.server.log_level,
         },
         "router": {
             "default": inner.config.router.default,
@@ -300,7 +300,7 @@ async fn get_config_json(
         },
         "providers": inner.config.providers,
         "models": inner.config.models,
-    }))
+    })).into_response()
 }
 
 /// Remove null values from JSON (TOML doesn't support null)
