@@ -1194,6 +1194,7 @@
                                                     type="text"
                                                     name="mappings[0][actual_model]"
                                                     class="input-field font-mono"
+                                                    list="model-suggestions"
                                                     placeholder="e.g., claude-sonnet-4-5 or anthropic/claude-sonnet-4-5"
                                                     required
                                                 />
@@ -1201,6 +1202,7 @@
                                                     Actual model name used by
                                                     the provider Model ID
                                                 </div>
+                                                <datalist id="model-suggestions"></datalist>
                                             </div>
                                         </div>
                                     </div>
@@ -2553,6 +2555,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
             }
 
             function renderAddModelView() {
+                populateModelSuggestions();
                 if (!appState.loaded) return;
 
                 const providers = appState.config.providers || [];
@@ -2615,6 +2618,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                         }
                     }
                     renderAddModelView();
+                    populateModelSuggestions();
                 }, 100);
             }
 
@@ -2679,7 +2683,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                     </div>
                     <div>
                         <label class="label">Model Name</label>
-                        <input type="text" name="mappings[${priority - 1}][actual_model]" class="input-field font-mono" placeholder="e.g., claude-sonnet-4-5 or anthropic/claude-sonnet-4-5" required>
+                        <input type="text" name="mappings[${priority - 1}][actual_model]" class="input-field font-mono" list="model-suggestions" placeholder="e.g., claude-sonnet-4-5 or anthropic/claude-sonnet-4-5" required>
                         <div class="helper-text">The actual model ID used by the provider</div>
                     </div>
                 </div>
@@ -4168,6 +4172,17 @@ strip_match = false             # strip matched phrase (default: false)</pre>
             // ── Auth ──
             // Key stored by server login page, passed to all API calls
             const ADMIN_KEY = sessionStorage.getItem("ccm_admin_key") || "";
+
+            // ── Model Suggestions ──
+            function populateModelSuggestions() {
+                const dl = document.getElementById("model-suggestions");
+                if (!dl || !appState.config) return;
+                const models = new Set();
+                for (const p of appState.config.providers || []) {
+                    for (const m of p.models || []) models.add(m);
+                }
+                dl.innerHTML = [...models].sort().map(m => `<option value="${escapeHtml(m)}">`).join("");
+            }
 
             // ── i18n ──
             const I18N = {
