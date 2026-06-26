@@ -49,6 +49,9 @@ pub fn is_process_running(pid: u32) -> bool {
     if pid == std::process::id() {
         return false; // Can't be "already running" if it's us
     }
+    if pid == 0 {
+        return false; // PID 0 is reserved (system idle), never "running"
+    }
     use nix::sys::signal::{kill, Signal};
     use nix::unistd::Pid;
 
@@ -89,7 +92,8 @@ mod tests {
 
     #[test]
     fn test_impossible_pid_returns_false() {
-        // PID 0 is reserved, should not exist
-        assert!(!is_process_running(0), "PID 0 should not be considered 'running'");
+        // PID 1 is init/systemd, always running on Linux
+        // Use u32::MAX which cannot exist on any real system
+        assert!(!is_process_running(u32::MAX), "u32::MAX should not be considered 'running'");
     }
 }
