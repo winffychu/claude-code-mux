@@ -4175,13 +4175,13 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                     "Overview": "概览",
                     "Models": "模型",
                     "Providers": "提供商",
-                    "Router": "路由器",
+                    "Router": "路由",
                     "Settings": "设置",
                     "Routing Status": "路由状态",
                     "Monitor your AI routing configuration": "监控 AI 路由配置",
                     "Status": "状态",
                     "Active": "活跃",
-                    "Router Configuration": "路由器配置",
+                    "Router Configuration": "路由配置",
                     "Default Model": "默认模型",
                     "Think Model": "思考模型",
                     "Background Model": "后台模型",
@@ -4239,7 +4239,10 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                         const target = currentLang === "zh" ? zh : en;
                         const source = currentLang === "zh" ? en : zh;
                         if (orig.includes(source)) {
-                            node.nodeValue = orig.replace(new RegExp(source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), target);
+                            const escaped = source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                            // Use word boundaries to avoid partial matches (e.g. "Router" in "OpenRouter")
+                            const regex = new RegExp('\\b' + escaped + '\\b', 'g');
+                            node.nodeValue = orig.replace(regex, target);
                             changed = true;
                         }
                     }
