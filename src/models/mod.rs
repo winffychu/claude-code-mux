@@ -270,6 +270,7 @@ pub struct RouteDecision {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteType {
     WebSearch,
+    LongContext,
     PromptRule,
     Think,
     Background,
@@ -282,6 +283,7 @@ impl std::fmt::Display for RouteType {
             RouteType::WebSearch => write!(f, "web-search"),
             RouteType::PromptRule => write!(f, "prompt-rule"),
             RouteType::Think => write!(f, "think"),
+            RouteType::LongContext => write!(f, "long-context"),
             RouteType::Background => write!(f, "background"),
             RouteType::Default => write!(f, "default"),
         }
