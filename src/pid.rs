@@ -4,8 +4,9 @@ use std::path::PathBuf;
 
 /// Get the PID file path
 pub fn get_pid_file() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".claude-code-mux").join("ccm.pid")
+    // Use /tmp to avoid Docker mount persistence issues.
+    // PID files are only meaningful within a single container lifecycle.
+    PathBuf::from("/tmp/ccm.pid")
 }
 
 /// Write the current process PID to the PID file
@@ -42,8 +43,12 @@ pub fn cleanup_pid() -> io::Result<()> {
 }
 
 /// Check if a process is running
+/// Returns false if PID matches the current process (self-check).
 #[cfg(unix)]
 pub fn is_process_running(pid: u32) -> bool {
+    if pid == std::process::id() {
+        return false; // Can't be "already running" if it's us
+    }
     use nix::sys::signal::{kill, Signal};
     use nix::unistd::Pid;
 
@@ -55,6 +60,9 @@ pub fn is_process_running(pid: u32) -> bool {
 
 #[cfg(windows)]
 pub fn is_process_running(pid: u32) -> bool {
+    if pid == std::process::id() {
+        return false;
+    }
     use std::process::Command;
 
     Command::new("tasklist")
@@ -67,4 +75,21 @@ pub fn is_process_running(pid: u32) -> bool {
                 .map(|s| s.contains(&pid.to_string()))
         })
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_current_pid_returns_false() {
+        let cur = std::process::id();
+        assert!(!is_process_running(cur), "current PID should not be considered 'running'");
+    }
+
+    #[test]
+    fn test_impossible_pid_returns_false() {
+        // PID 0 is reserved, should not exist
+        assert!(!is_process_running(0), "PID 0 should not be considered 'running'");
+    }
 }
