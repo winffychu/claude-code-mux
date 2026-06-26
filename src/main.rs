@@ -199,7 +199,7 @@ async fn main() -> anyhow::Result<()> {
                 config.server.port = port;
             }
 
-            // Check if already running
+            // Check if already running (PID in /tmp, gone on container restart)
             if let Ok(existing_pid) = pid::read_pid() {
                 if pid::is_process_running(existing_pid) {
                     eprintln!("❌ Error: Service is already running (PID: {})", existing_pid);
