@@ -129,12 +129,6 @@ pub struct RouterConfig {
     pub background_regex: Option<String>,
     pub prompt_rules: Vec<PromptRule>,
 }
-    /// If empty/null, defaults to claude-haiku pattern.
-    pub background_regex: Option<String>,
-    /// Prompt-based routing rules. Routes to specific models when patterns match user prompt.
-    #[serde(default)]
-    pub prompt_rules: Vec<PromptRule>,
-}
 
 /// Prompt-based routing rule
 #[derive(Debug, Clone, Deserialize, Serialize)]
