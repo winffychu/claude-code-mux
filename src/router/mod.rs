@@ -231,8 +231,8 @@ impl Router {
         }
 
         // 4. Long Context (input tokens > threshold)
-        if let Some(ref lc_model) = inner.config.router.long_context {
-            let threshold = inner.config.router.long_context_threshold.unwrap_or(64000);
+        if let Some(ref lc_model) = self.config.router.long_context {
+            let threshold = self.config.router.long_context_threshold.unwrap_or(64000);
             let tokens = estimate_input_tokens(request);
             if tokens > threshold {
                 debug!("📏 Long context: {} tokens > {} threshold, routing to {}", tokens, threshold, lc_model);
