@@ -93,7 +93,7 @@ mod tests {
     #[test]
     fn test_impossible_pid_returns_false() {
         // PID 1 is init/systemd, always running on Linux
-        // Use u32::MAX which cannot exist on any real system
-        assert!(!is_process_running(u32::MAX), "u32::MAX should not be considered 'running'");
+        // Use 999_999_999u32 which cannot exist on any real system
+        assert!(!is_process_running(999_999_999u32), "999_999_999u32 should not be considered 'running'");
     }
 }
