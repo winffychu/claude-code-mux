@@ -123,10 +123,12 @@ pub struct RouterConfig {
     pub background: Option<String>,
     pub think: Option<String>,
     pub websearch: Option<String>,
-    /// Regex pattern for auto-mapping models (e.g., "^claude-").
-    /// If empty/null, defaults to Claude models only.
+    pub long_context: Option<String>,
+    pub long_context_threshold: Option<u32>,
     pub auto_map_regex: Option<String>,
-    /// Regex pattern for detecting background tasks (e.g., "(?i)claude.*haiku").
+    pub background_regex: Option<String>,
+    pub prompt_rules: Vec<PromptRule>,
+}
     /// If empty/null, defaults to claude-haiku pattern.
     pub background_regex: Option<String>,
     /// Prompt-based routing rules. Routes to specific models when patterns match user prompt.
@@ -288,8 +290,12 @@ default = "placeholder-model"
 # Optional: Model for thinking/reasoning tasks (e.g., "claude-opus-4-1")
 # think = ""
 
-# Optional: Model for web search tasks (e.g., "glm-4.6")
+# Optional: Web search model (e.g., for internet search features)
 # websearch = ""
+
+# Long context model — input tokens > threshold → route to this model
+# long_context = "claude-sonnet-4-5"
+# long_context_threshold = 64000
 
 # Optional: Regex pattern for auto-mapping models (e.g., "^claude-")
 # auto_map_regex = ""
