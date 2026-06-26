@@ -1295,6 +1295,26 @@
                                 <option value="">Not configured</option>
                             </select>
                         </div>
+                    
+
+                        <!-- Long Context Model -->
+                        <div class="card">
+                            <h2 class="text-xl font-bold mb-6">Long Context Model</h2>
+                            <p class="text-gray-600 mb-6">Model used when input tokens exceed threshold</p>
+                            <div class="flex gap-4 items-end">
+                                <div class="flex-1">
+                                    <label class="label">Model</label>
+                                    <select name="long_context_model" class="input-field">
+                                        <option value="">Use default model</option>
+                                    </select>
+                                </div>
+                                <div class="w-40">
+                                    <label class="label">Threshold (tokens)</label>
+                                    <input type="number" name="long_context_threshold" class="input-field"
+                                        placeholder="64000" min="1000" step="1000">
+                                </div>
+                            </div>
+                        </div>
                     </form>
 
                     <!-- Prompt Rules (read-only) -->
@@ -1931,6 +1951,12 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                 const websearchSelect = document.querySelector(
                     '[name="websearch_model"]',
                 );
+                const lcModelSelect = document.querySelector(
+                    '[name="long_context_model"]',
+                );
+                const lcThresholdInput = document.querySelector(
+                    '[name="long_context_threshold"]',
+                );
 
                 if (defaultSelect)
                     defaultSelect.value = config.router.default || "";
@@ -1939,6 +1965,10 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                     backgroundSelect.value = config.router.background || "";
                 if (websearchSelect)
                     websearchSelect.value = config.router.websearch || "";
+                if (lcModelSelect)
+                    lcModelSelect.value = config.router.long_context || "";
+                if (lcThresholdInput)
+                    lcThresholdInput.value = config.router.long_context_threshold || "";
 
                 // Display prompt rules (read-only)
                 const promptRulesList = document.getElementById("prompt-rules-list");
@@ -2920,6 +2950,22 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                                         websearchModel;
                                 } else {
                                     delete appState.config.router.websearch;
+                                }
+
+                                const lcModel = formData.get("long_context_model");
+                                const lcThreshold = formData.get("long_context_threshold");
+
+                                if (lcModel) {
+                                    appState.config.router.long_context = lcModel;
+                                } else {
+                                    delete appState.config.router.long_context;
+                                }
+
+                                if (lcThreshold) {
+                                    appState.config.router.long_context_threshold =
+                                        parseInt(lcThreshold, 10) || 64000;
+                                } else {
+                                    delete appState.config.router.long_context_threshold;
                                 }
 
                                 console.log(
