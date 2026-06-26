@@ -698,7 +698,9 @@ mod tests {
                 websearch: Some("websearch.model".to_string()),
                 auto_map_regex: None,   // Use default Claude pattern
                 background_regex: None, // Use default claude-haiku pattern
-                prompt_rules: vec![],   // No prompt rules by default
+                long_context: None,
+            long_context_threshold: None,
+            prompt_rules: vec![],   // No prompt rules by default
             },
             providers: vec![],
             models: vec![],
