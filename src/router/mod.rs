@@ -31,6 +31,8 @@ pub struct Router {
     auto_map_regex: Option<Regex>,
     background_regex: Option<Regex>,
     prompt_rules: Vec<CompiledPromptRule>,
+}
+
 fn estimate_input_tokens(request: &AnthropicRequest) -> u32 {
     // Character-based estimation: ~4 chars per token (matching CCR's approach)
     // No API calls needed, suitable for routing decisions (±20% accuracy)
