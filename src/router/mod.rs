@@ -31,8 +31,6 @@ pub struct Router {
     auto_map_regex: Option<Regex>,
     background_regex: Option<Regex>,
     prompt_rules: Vec<CompiledPromptRule>,
-}
-
 fn estimate_input_tokens(request: &AnthropicRequest) -> u32 {
     // Character-based estimation: ~4 chars per token (matching CCR's approach)
     // No API calls needed, suitable for routing decisions (±20% accuracy)
@@ -42,25 +40,23 @@ fn estimate_input_tokens(request: &AnthropicRequest) -> u32 {
     if let Some(ref sys) = request.system {
         match sys {
             SystemPrompt::Text(t) => chars += t.len() as u64,
-            SystemPrompt::List(blocks) => {
+            SystemPrompt::Blocks(blocks) => {
                 for block in blocks {
-                    if let MessageContent::Text(t) = block {
-                        chars += t.text.len() as u64;
-                    }
+                    chars += block.text.len() as u64;
                 }
             }
         }
     }
 
-    // Messages
+    // Messages — only count text blocks, skip images/tool_use/tool_result
     for msg in &request.messages {
         chars += msg.role.len() as u64;
         match &msg.content {
             MessageContent::Text(t) => chars += t.len() as u64,
-            MessageContent::List(blocks) => {
+            MessageContent::Blocks(blocks) => {
                 for block in blocks {
-                    if let ContentBlock::Text(t) = block {
-                        chars += t.text.len() as u64;
+                    if let Some(text) = block.as_text() {
+                        chars += text.len() as u64;
                     }
                 }
             }
@@ -77,7 +73,7 @@ fn estimate_input_tokens(request: &AnthropicRequest) -> u32 {
     (chars / 4) as u32
 }
 
-impl Router {
+
     /// Create a new router with configuration
     pub fn new(config: AppConfig) -> Self {
         // Compile auto-map regex
