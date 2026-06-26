@@ -73,6 +73,7 @@ fn estimate_input_tokens(request: &AnthropicRequest) -> u32 {
     (chars / 4) as u32
 }
 
+impl Router {
 
     /// Create a new router with configuration
     pub fn new(config: AppConfig) -> Self {
