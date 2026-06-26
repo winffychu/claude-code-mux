@@ -1,5 +1,5 @@
 use crate::cli::AppConfig;
-use crate::models::{AnthropicRequest, MessageContent, RouteDecision, RouteType, SystemPrompt};
+use crate::models::{AnthropicRequest, ContentBlock, MessageContent, RouteDecision, RouteType, SystemPrompt};
 use anyhow::Result;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -31,6 +31,50 @@ pub struct Router {
     auto_map_regex: Option<Regex>,
     background_regex: Option<Regex>,
     prompt_rules: Vec<CompiledPromptRule>,
+}
+
+fn estimate_input_tokens(request: &AnthropicRequest) -> u32 {
+    // Character-based estimation: ~4 chars per token (matching CCR's approach)
+    // No API calls needed, suitable for routing decisions (±20% accuracy)
+    let mut chars: u64 = 0;
+
+    // System prompt
+    if let Some(ref sys) = request.system {
+        match sys {
+            SystemPrompt::Text(t) => chars += t.len() as u64,
+            SystemPrompt::List(blocks) => {
+                for block in blocks {
+                    if let MessageContent::Text(t) = block {
+                        chars += t.text.len() as u64;
+                    }
+                }
+            }
+        }
+    }
+
+    // Messages
+    for msg in &request.messages {
+        chars += msg.role.len() as u64;
+        match &msg.content {
+            MessageContent::Text(t) => chars += t.len() as u64,
+            MessageContent::List(blocks) => {
+                for block in blocks {
+                    if let ContentBlock::Text(t) = block {
+                        chars += t.text.len() as u64;
+                    }
+                }
+            }
+        }
+    }
+
+    // Tool definitions (not tool results)
+    if let Some(ref tools) = request.tools {
+        if let Ok(json) = serde_json::to_string(tools) {
+            chars += json.len() as u64;
+        }
+    }
+
+    (chars / 4) as u32
 }
 
 impl Router {
@@ -181,6 +225,20 @@ impl Router {
                 return Ok(RouteDecision {
                     model_name: background_model.clone(),
                     route_type: RouteType::Background,
+                    matched_prompt: None,
+                });
+            }
+        }
+
+        // 4. Long Context (input tokens > threshold)
+        if let Some(ref lc_model) = inner.config.router.long_context {
+            let threshold = inner.config.router.long_context_threshold.unwrap_or(64000);
+            let tokens = estimate_input_tokens(request);
+            if tokens > threshold {
+                debug!("📏 Long context: {} tokens > {} threshold, routing to {}", tokens, threshold, lc_model);
+                return Ok(RouteDecision {
+                    model_name: lc_model.clone(),
+                    route_type: RouteType::LongContext,
                     matched_prompt: None,
                 });
             }
