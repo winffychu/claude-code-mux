@@ -127,6 +127,7 @@ pub struct RouterConfig {
     pub long_context_threshold: Option<u32>,
     pub auto_map_regex: Option<String>,
     pub background_regex: Option<String>,
+    #[serde(default)]
     pub prompt_rules: Vec<PromptRule>,
 }
 
