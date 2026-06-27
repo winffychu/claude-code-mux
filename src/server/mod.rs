@@ -450,6 +450,10 @@ async fn update_config_json(
                 if let Some(val) = value {
                     if let Some(s) = val.as_str() {
                         table.insert(key.to_string(), toml::Value::String(s.to_string()));
+                    } else if let Some(n) = val.as_u64() {
+                        table.insert(key.to_string(), toml::Value::Integer(n as i64));
+                    } else if let Some(n) = val.as_i64() {
+                        table.insert(key.to_string(), toml::Value::Integer(n));
                     }
                 } else {
                     // Remove field if not present in incoming config
@@ -468,6 +472,8 @@ async fn update_config_json(
             update_field(router_table, "think", router.get("think"));
             update_field(router_table, "websearch", router.get("websearch"));
             update_field(router_table, "background", router.get("background"));
+            update_field(router_table, "long_context", router.get("long_context"));
+            update_field(router_table, "long_context_threshold", router.get("long_context_threshold"));
             update_field(router_table, "auto_map_regex", router.get("auto_map_regex"));
             update_field(router_table, "background_regex", router.get("background_regex"));
         }
