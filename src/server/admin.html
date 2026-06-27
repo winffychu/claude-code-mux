@@ -1122,6 +1122,7 @@
                                         name="model_name"
                                         class="input-field font-mono"
                                         placeholder="e.g., claude-sonnet-4-5"
+                                        list="model-suggestions"
                                         required
                                     />
                                     <div class="helper-text">
@@ -2520,7 +2521,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                                     </div>
                                     <div>
                                         <label class="label">Model Name</label>
-                                        <input type="text" name="mappings[${index}][actual_model]" class="input-field font-mono" value="${escapeHtml(mapping.actual_model)}" placeholder="e.g., claude-sonnet-4-5 or anthropic/claude-sonnet-4-5" required>
+                                        <input type="text" name="mappings[${index}][actual_model]" class="input-field font-mono" value="${escapeHtml(mapping.actual_model)}" placeholder="e.g., claude-sonnet-4-5 or anthropic/claude-sonnet-4-5" list="model-suggestions" required>
                                         <div class="helper-text">The actual model ID used by the provider</div>
                                     </div>
                                 </div>
@@ -2560,7 +2561,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                                     </div>
                                     <div>
                                         <label class="label">Model Name</label>
-                                        <input type="text" name="mappings[${index}][actual_model]" class="input-field font-mono" value="${escapeHtml(mapping.actual_model)}" placeholder="e.g., claude-sonnet-4-5 or anthropic/claude-sonnet-4-5" required>
+                                        <input type="text" name="mappings[${index}][actual_model]" class="input-field font-mono" value="${escapeHtml(mapping.actual_model)}" placeholder="e.g., claude-sonnet-4-5 or anthropic/claude-sonnet-4-5" list="model-suggestions" required>
                                         <div class="helper-text">The actual model ID used by the provider</div>
                                     </div>
                                 </div>
