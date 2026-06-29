@@ -474,6 +474,7 @@ impl AnthropicProvider for GeminiProvider {
             let bearer_token = bearer_token.clone();
             let code_assist_request = code_assist_request.clone();
             let url = url.clone();
+            let client_headers = request.client_headers.clone();
 
             // Use retry handler for 429 errors
             let response = self.handle_rate_limit_retry(
@@ -485,6 +486,18 @@ impl AnthropicProvider for GeminiProvider {
 
                     // Add custom headers
                     for (key, value) in &custom_headers {
+                        req_builder = req_builder.header(key, value);
+                    }
+
+                    // Merge client headers (transparent pass-through)
+                    for (key, value) in &client_headers {
+                        if key.eq_ignore_ascii_case("x-api-key") 
+                            || key.eq_ignore_ascii_case("x-admin-key")
+                            || key.eq_ignore_ascii_case("authorization")
+                            || key.eq_ignore_ascii_case("x-provider") 
+                            || key.eq_ignore_ascii_case("host") {
+                            continue;
+                        }
                         req_builder = req_builder.header(key, value);
                     }
 
@@ -562,6 +575,7 @@ impl AnthropicProvider for GeminiProvider {
             let custom_headers = self.custom_headers.clone();
             let gemini_request = gemini_request.clone();
             let url = url.clone();
+            let client_headers = request.client_headers.clone();
 
             // Use retry handler for 429 errors
             let response = self.handle_rate_limit_retry(
@@ -570,6 +584,18 @@ impl AnthropicProvider for GeminiProvider {
 
                     // Add custom headers
                     for (key, value) in &custom_headers {
+                        req_builder = req_builder.header(key, value);
+                    }
+
+                    // Merge client headers (transparent pass-through)
+                    for (key, value) in &client_headers {
+                        if key.eq_ignore_ascii_case("x-api-key") 
+                            || key.eq_ignore_ascii_case("x-admin-key")
+                            || key.eq_ignore_ascii_case("authorization")
+                            || key.eq_ignore_ascii_case("x-provider") 
+                            || key.eq_ignore_ascii_case("host") {
+                            continue;
+                        }
                         req_builder = req_builder.header(key, value);
                     }
 
@@ -663,6 +689,18 @@ impl AnthropicProvider for GeminiProvider {
                 req_builder = req_builder.header(key, value);
             }
 
+            // Merge client headers (transparent pass-through)
+            for (key, value) in &request.client_headers {
+                if key.eq_ignore_ascii_case("x-api-key") 
+                    || key.eq_ignore_ascii_case("x-admin-key")
+                    || key.eq_ignore_ascii_case("authorization")
+                    || key.eq_ignore_ascii_case("x-provider") 
+                    || key.eq_ignore_ascii_case("host") {
+                    continue;
+                }
+                req_builder = req_builder.header(key, value);
+            }
+
             // Send request
             let response = req_builder.json(&code_assist_request).send().await?;
 
@@ -721,6 +759,18 @@ impl AnthropicProvider for GeminiProvider {
 
             // Add custom headers
             for (key, value) in &self.custom_headers {
+                req_builder = req_builder.header(key, value);
+            }
+
+            // Merge client headers (transparent pass-through)
+            for (key, value) in &request.client_headers {
+                if key.eq_ignore_ascii_case("x-api-key") 
+                    || key.eq_ignore_ascii_case("x-admin-key")
+                    || key.eq_ignore_ascii_case("authorization")
+                    || key.eq_ignore_ascii_case("x-provider") 
+                    || key.eq_ignore_ascii_case("host") {
+                    continue;
+                }
                 req_builder = req_builder.header(key, value);
             }
 

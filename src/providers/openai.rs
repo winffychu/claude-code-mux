@@ -1279,6 +1279,18 @@ impl AnthropicProvider for OpenAIProvider {
                 req_builder = req_builder.header(key, value);
             }
 
+            // Merge client headers (transparent pass-through)
+            for (key, value) in &request.client_headers {
+                if key.eq_ignore_ascii_case("x-api-key") 
+                    || key.eq_ignore_ascii_case("x-admin-key")
+                    || key.eq_ignore_ascii_case("authorization")
+                    || key.eq_ignore_ascii_case("x-provider") 
+                    || key.eq_ignore_ascii_case("host") {
+                    continue;
+                }
+                req_builder = req_builder.header(key, value);
+            }
+
             let response = req_builder
                 .json(&responses_request)
                 .send()
@@ -1349,6 +1361,18 @@ impl AnthropicProvider for OpenAIProvider {
 
             // Add custom headers (for OpenRouter, NovitaAI, etc.)
             for (key, value) in &self.custom_headers {
+                req_builder = req_builder.header(key, value);
+            }
+
+            // Merge client headers (transparent pass-through)
+            for (key, value) in &request.client_headers {
+                if key.eq_ignore_ascii_case("x-api-key") 
+                    || key.eq_ignore_ascii_case("x-admin-key")
+                    || key.eq_ignore_ascii_case("authorization")
+                    || key.eq_ignore_ascii_case("x-provider") 
+                    || key.eq_ignore_ascii_case("host") {
+                    continue;
+                }
                 req_builder = req_builder.header(key, value);
             }
 
@@ -1490,6 +1514,18 @@ impl AnthropicProvider for OpenAIProvider {
 
         // Add custom headers (for OpenRouter, NovitaAI, etc.)
         for (key, value) in &self.custom_headers {
+            req_builder = req_builder.header(key, value);
+        }
+
+        // Merge client headers (transparent pass-through)
+        for (key, value) in &request.client_headers {
+            if key.eq_ignore_ascii_case("x-api-key") 
+                || key.eq_ignore_ascii_case("x-admin-key")
+                || key.eq_ignore_ascii_case("authorization")
+                || key.eq_ignore_ascii_case("x-provider") 
+                || key.eq_ignore_ascii_case("host") {
+                continue;
+            }
             req_builder = req_builder.header(key, value);
         }
 

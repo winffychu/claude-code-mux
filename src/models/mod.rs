@@ -25,6 +25,10 @@ pub struct AnthropicRequest {
     pub system: Option<SystemPrompt>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<Tool>>,
+
+    /// Client headers to forward to upstream providers (CCM-stripped transparent pass-through)
+    #[serde(skip)]
+    pub client_headers: std::collections::HashMap<String, String>,
 }
 
 /// Message in the conversation

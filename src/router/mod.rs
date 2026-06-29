@@ -724,6 +724,7 @@ mod tests {
             metadata: None,
             system: None,
             tools: None,
+            client_headers: std::collections::HashMap::new(),
         }
     }
 
@@ -1087,6 +1088,7 @@ mod tests {
             metadata: None,
             system: None,
             tools: None,
+            client_headers: std::collections::HashMap::new(),
         };
 
         let decision = router.route(&mut request).unwrap();
@@ -1141,6 +1143,7 @@ mod tests {
             metadata: None,
             system: None,
             tools: None,
+            client_headers: std::collections::HashMap::new(),
         };
 
         let decision = router.route(&mut request).unwrap();
@@ -1206,6 +1209,7 @@ mod tests {
             metadata: None,
             system: None,
             tools: None,
+            client_headers: std::collections::HashMap::new(),
         };
 
         let decision = router.route(&mut request).unwrap();

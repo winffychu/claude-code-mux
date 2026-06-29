@@ -210,6 +210,7 @@ pub fn transform_openai_to_anthropic(openai_req: OpenAIRequest) -> Result<Anthro
         metadata: None,
         system: system_prompt,
         tools: None, // TODO: Transform tools if needed
+        client_headers: std::collections::HashMap::new(),
     })
 }
 

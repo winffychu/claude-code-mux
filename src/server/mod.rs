@@ -17,6 +17,7 @@ use axum::{
     routing::{get, post},
     Json, Router as AxumRouter,
 };
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing::{debug, error, info};
@@ -604,6 +605,9 @@ async fn handle_openai_chat_completions(
     let mut anthropic_request = openai_compat::transform_openai_to_anthropic(openai_request)
         .map_err(|e| AppError::ParseError(format!("Failed to transform OpenAI request: {}", e)))?;
 
+    // Set client headers for transparent pass-through to upstream
+    anthropic_request.client_headers = build_client_headers(&headers);
+
     // 2. Route the request (may modify system prompt to remove CCM-SUBAGENT-MODEL tag)
     let decision = inner
         .router
@@ -804,6 +808,32 @@ fn inject_continuation_text(msg: &mut crate::models::Message) {
     }
 }
 
+/// Build a client_headers map from incoming request headers, stripping CCM-internal headers.
+/// All other headers are passed through transparently to upstream providers.
+fn build_client_headers(headers: &HeaderMap) -> HashMap<String, String> {
+    let mut client_headers = HashMap::new();
+    for (key, value) in headers.iter() {
+        let name = key.as_str().to_lowercase();
+        // Strip CCM internal headers
+        if name == "x-api-key"
+            || name == "x-admin-key"
+            || name == "authorization"
+            || name == "x-provider"
+            || name == "host"
+        {
+            continue;
+        }
+        if let Ok(v) = value.to_str() {
+            // Skip the anthropic-version header we set internally (CCM sets its own 2023-06-01)
+            if name == "anthropic-version" {
+                continue;
+            }
+            client_headers.insert(name, v.to_string());
+        }
+    }
+    client_headers
+}
+
 /// Handle /v1/messages requests (both streaming and non-streaming)
 async fn handle_messages(
     State(state): State<Arc<AppState>>,
@@ -841,6 +871,9 @@ async fn handle_messages(
             }
             AppError::ParseError(format!("Invalid request format: {}", e))
         })?;
+
+    // Set client headers for transparent pass-through to upstream
+    request_for_routing.client_headers = build_client_headers(&headers);
 
     // 2. Route the request (may modify system prompt to remove CCM-SUBAGENT-MODEL tag)
     let decision = inner
@@ -888,6 +921,9 @@ async fn handle_messages(
                 // Parse request as Anthropic format
                 let mut anthropic_request: AnthropicRequest = serde_json::from_value(request_json.clone())
                     .map_err(|e| AppError::ParseError(format!("Invalid request format: {}", e)))?;
+
+                // Set client headers for transparent pass-through to upstream
+                anthropic_request.client_headers = build_client_headers(&headers);
 
                 // Save original model name for response
                 let original_model = anthropic_request.model.clone();
@@ -1115,6 +1151,7 @@ async fn handle_count_tokens(
         stop_sequences: None,
         stream: None,
         metadata: None,
+        client_headers: build_client_headers(&headers),
     };
     let decision = inner
         .router

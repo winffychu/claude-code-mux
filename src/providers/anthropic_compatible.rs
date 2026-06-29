@@ -344,16 +344,41 @@ impl AnthropicCompatibleProvider {
             .header("Content-Type", "application/json");
 
         // Set auth header based on OAuth vs API key
+        // Compute anthropic-beta value: use client's if present, otherwise fallback
+        let beta_header = request.client_headers.get("anthropic-beta")
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| {
+                if self.is_oauth() {
+                    "oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14".to_string()
+                } else {
+                    "claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14".to_string()
+                }
+            });
+
         if self.is_oauth() {
             req_builder = req_builder
                 .header("Authorization", format!("Bearer {}", auth_value))
-                .header("anthropic-beta", "oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14");
+                .header("anthropic-beta", &beta_header);
         } else {
-            req_builder = req_builder.header("x-api-key", auth_value);
+            req_builder = req_builder.header("x-api-key", auth_value)
+                .header("anthropic-beta", &beta_header);
         }
 
         // Add custom headers
         for (key, value) in &self.custom_headers {
+            req_builder = req_builder.header(key, value);
+        }
+
+        // Merge client headers (transparent pass-through)
+        for (key, value) in &request.client_headers {
+            // Skip headers CCM strips in server layer
+            if key.eq_ignore_ascii_case("x-api-key") 
+                || key.eq_ignore_ascii_case("x-admin-key")
+                || key.eq_ignore_ascii_case("authorization")
+                || key.eq_ignore_ascii_case("x-provider") 
+                || key.eq_ignore_ascii_case("host") {
+                continue;
+            }
             req_builder = req_builder.header(key, value);
         }
 
@@ -393,15 +418,39 @@ impl AnthropicCompatibleProvider {
             .header("anthropic-version", "2023-06-01")
             .header("Content-Type", "application/json");
 
+        // Compute anthropic-beta value: use client's if present, otherwise fallback
+        let beta_header = request.client_headers.get("anthropic-beta")
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| {
+                if self.is_oauth() {
+                    "oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14".to_string()
+                } else {
+                    "claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14".to_string()
+                }
+            });
+
         if self.is_oauth() {
             req_builder = req_builder
                 .header("Authorization", format!("Bearer {}", auth_value))
-                .header("anthropic-beta", "oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14");
+                .header("anthropic-beta", &beta_header);
         } else {
-            req_builder = req_builder.header("x-api-key", auth_value);
+            req_builder = req_builder.header("x-api-key", auth_value)
+                .header("anthropic-beta", &beta_header);
         }
 
         for (key, value) in &self.custom_headers {
+            req_builder = req_builder.header(key, value);
+        }
+
+        // Merge client headers (transparent pass-through)
+        for (key, value) in &request.client_headers {
+            if key.eq_ignore_ascii_case("x-api-key") 
+                || key.eq_ignore_ascii_case("x-admin-key")
+                || key.eq_ignore_ascii_case("authorization")
+                || key.eq_ignore_ascii_case("x-provider") 
+                || key.eq_ignore_ascii_case("host") {
+                continue;
+            }
             req_builder = req_builder.header(key, value);
         }
 
