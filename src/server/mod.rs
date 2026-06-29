@@ -153,7 +153,7 @@ async fn login_handler(
     let inner = state.snapshot();
     let expected = inner.config.server.admin_password.as_deref().unwrap_or("admin");
 
-    if password == expected || password == "admin" && expected == "admin" {
+    if password == expected {
         Json(serde_json::json!({ "success": true })).into_response()
     } else {
         let resp = Json(serde_json::json!({ "success": false, "error": "Invalid password" }));
@@ -372,6 +372,8 @@ async fn get_config_json(
             "background": inner.config.router.background,
             "think": inner.config.router.think,
             "websearch": inner.config.router.websearch,
+            "long_context": inner.config.router.long_context,
+            "long_context_threshold": inner.config.router.long_context_threshold,
             "auto_map_regex": inner.config.router.auto_map_regex,
             "background_regex": inner.config.router.background_regex,
             "prompt_rules": inner.config.router.prompt_rules,
@@ -483,14 +485,32 @@ async fn update_config_json(
     let new_config_str = toml::to_string_pretty(&config)
         .map_err(|e| AppError::ParseError(format!("Failed to serialize config: {}", e)))?;
 
-    std::fs::write(config_path, new_config_str)
+    std::fs::write(&state.config_path, new_config_str)
         .map_err(|e| AppError::ParseError(format!("Failed to write config: {}", e)))?;
 
-    info!("✅ Configuration updated successfully via admin UI");
+    // Auto-reload: re-read the file we just wrote and apply to runtime state
+    let config_str = std::fs::read_to_string(&state.config_path)
+        .map_err(|e| AppError::ParseError(format!("Failed to re-read config after save: {}", e)))?;
+    let reloaded_config: AppConfig = toml::from_str(&config_str)
+        .map_err(|e| AppError::ParseError(format!("Failed to parse config after save: {}", e)))?;
+    let new_router = Router::new(reloaded_config.clone());
+    let new_registry = ProviderRegistry::from_configs_with_models(
+        &reloaded_config.providers,
+        Some(state.token_store.clone()),
+        &reloaded_config.models,
+    ).map_err(|e| AppError::ParseError(format!("Failed to rebuild providers: {}", e)))?;
+    let new_inner = Arc::new(ReloadableState {
+        config: reloaded_config,
+        router: new_router,
+        provider_registry: Arc::new(new_registry),
+    });
+    *state.inner.write().unwrap() = new_inner;
+
+    info!("✅ Configuration updated and reloaded successfully via admin UI");
 
     Ok(Json(serde_json::json!({
         "status": "success",
-        "message": "Configuration saved successfully"
+        "message": "Configuration saved and reloaded successfully"
     })))
 }
 
@@ -635,9 +655,11 @@ async fn handle_openai_chat_completions(
                 // Build route type display (include matched prompt snippet if available)
                 let route_type_display = match &decision.matched_prompt {
                     Some(matched) => {
-                        // Trim prompt to max 30 chars
-                        let trimmed = if matched.len() > 30 {
-                            format!("{}...", &matched[..27])
+                        // Unicode-safe truncation to ~30 chars
+                        let chars: Vec<char> = matched.chars().take(30).collect();
+                        let trimmed = if matched.chars().count() > 30 {
+                            let s: String = chars.iter().take(27).collect();
+                            format!("{}...", s)
                         } else {
                             matched.clone()
                         };
@@ -902,9 +924,11 @@ async fn handle_messages(
                 // Build route type display (include matched prompt snippet if available)
                 let route_type_display = match &decision.matched_prompt {
                     Some(matched) => {
-                        // Trim prompt to max 30 chars
-                        let trimmed = if matched.len() > 30 {
-                            format!("{}...", &matched[..27])
+                        // Unicode-safe truncation to ~30 chars
+                        let chars: Vec<char> = matched.chars().take(30).collect();
+                        let trimmed = if matched.chars().count() > 30 {
+                            let s: String = chars.iter().take(27).collect();
+                            format!("{}...", s)
                         } else {
                             matched.clone()
                         };

@@ -1937,6 +1937,9 @@ strip_match = false             # strip matched phrase (default: false)</pre>
 
                 const config = appState.config;
 
+                // Refresh model suggestions datalist before populating form
+                populateModelSuggestions();
+
                 // Populate router form with current values
                 const defaultSelect = document.querySelector(
                     '[name="default_model"]',
@@ -3948,14 +3951,14 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                                         </div>
                                         <div class="flex gap-2">
                                             <button
-                                                class="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-sm font-semibold hover:bg-blue-200 transition-all"
-                                                onclick="refreshOAuthToken('${escapeHtml(token.provider_id)}')"
+                                                class="oauth-refresh-btn px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-sm font-semibold hover:bg-blue-200 transition-all"
+                                                data-provider-id="${escapeHtml(token.provider_id)}"
                                             >
                                                 Refresh
                                             </button>
                                             <button
-                                                class="px-3 py-1 bg-red-100 text-red-700 rounded-lg text-sm font-semibold hover:bg-red-200 transition-all"
-                                                onclick="deleteOAuthToken('${escapeHtml(token.provider_id)}')"
+                                                class="oauth-delete-btn px-3 py-1 bg-red-100 text-red-700 rounded-lg text-sm font-semibold hover:bg-red-200 transition-all"
+                                                data-provider-id="${escapeHtml(token.provider_id)}"
                                             >
                                                 Delete
                                             </button>
@@ -3965,6 +3968,14 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                             `;
                             })
                             .join("");
+
+                        // Attach event listeners via delegation (fixes XSS from inline onclick)
+                        listEl.querySelectorAll(".oauth-refresh-btn").forEach(btn => {
+                            btn.addEventListener("click", () => refreshOAuthToken(btn.dataset.providerId));
+                        });
+                        listEl.querySelectorAll(".oauth-delete-btn").forEach(btn => {
+                            btn.addEventListener("click", () => deleteOAuthToken(btn.dataset.providerId));
+                        });
                     }
                 } catch (error) {
                     console.error("Failed to load OAuth tokens:", error);
@@ -4223,8 +4234,17 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                 const dl = document.getElementById("model-suggestions");
                 if (!dl || !appState.config) return;
                 const models = new Set();
+                // Collect from provider models lists
                 for (const p of appState.config.providers || []) {
                     for (const m of p.models || []) models.add(m);
+                }
+                // Also collect from registered model names (model keys in models array)
+                for (const m of appState.config.models || []) {
+                    if (m.name) models.add(m.name);
+                    // Also add actual_model from mappings for known provider models
+                    for (const mapping of m.mappings || []) {
+                        if (mapping.actual_model) models.add(mapping.actual_model);
+                    }
                 }
                 dl.innerHTML = [...models].sort().map(m => `<option value="${escapeHtml(m)}">`).join("");
             }
