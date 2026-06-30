@@ -1,5 +1,5 @@
 use crate::cli::AppConfig;
-use crate::models::{AnthropicRequest, ContentBlock, MessageContent, RouteDecision, RouteType, SystemPrompt};
+use crate::models::{AnthropicRequest, MessageContent, RouteDecision, RouteType, SystemPrompt};
 use anyhow::Result;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -699,8 +699,8 @@ mod tests {
                 auto_map_regex: None,   // Use default Claude pattern
                 background_regex: None, // Use default claude-haiku pattern
                 long_context: None,
-            long_context_threshold: None,
-            prompt_rules: vec![],   // No prompt rules by default
+                long_context_threshold: None,
+                prompt_rules: vec![], // No prompt rules by default
             },
             providers: vec![],
             models: vec![],

@@ -9,14 +9,14 @@ RUN apt-get update -qq && apt-get install -y -qq \
     rustup target add x86_64-unknown-linux-musl
 
 WORKDIR /app
-COPY Cargo.toml statusline.sh ./
-COPY test_direct.sh test_litellm.sh test_routing.sh ./
+COPY Cargo.toml Cargo.lock ./
+RUN cargo build --release --target x86_64-unknown-linux-musl --locked 2>&1 || true  # Build deps only (will fail, but caches deps)
 COPY src ./src
 COPY benches ./benches
 COPY tests ./tests
 COPY config ./config
 
-RUN cargo build --release --target x86_64-unknown-linux-musl \
+RUN cargo build --release --target x86_64-unknown-linux-musl --locked \
     && cp target/x86_64-unknown-linux-musl/release/ccm /app/ccm \
     && mkdir -p /home/nonroot/.claude-code-mux
 
@@ -50,6 +50,7 @@ CMD ["start"]
 # Stage 4: busybox — 资源受限
 # =============================================================
 FROM busybox:1.36-glibc AS busybox
+COPY --from=builder /etc/ssl/certs /etc/ssl/certs
 COPY --from=builder /app/ccm /usr/local/bin/ccm
 ENV HOME=/root
 EXPOSE 13456

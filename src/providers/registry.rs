@@ -9,7 +9,7 @@ use std::sync::Arc;
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 
 /// GitHub repository URL (used in HTTP-Referer headers)
-const REPO_URL: &str = "https://github.com/elidickinson/claude-code-mux";
+const REPO_URL: &str = "https://github.com/winffychu/claude-code-mux";
 
 /// Provider registry that manages all configured providers
 pub struct ProviderRegistry {

@@ -34,7 +34,7 @@ pub struct ReloadableState {
 /// Application state shared across handlers
 pub struct AppState {
     /// Reloadable state behind a single lock for atomic updates
-    inner: std::sync::RwLock<Arc<ReloadableState>>,
+    inner: tokio::sync::RwLock<Arc<ReloadableState>>,
 
     /// Persistent state - NOT reloaded
     pub token_store: TokenStore,
@@ -44,8 +44,8 @@ pub struct AppState {
 
 impl AppState {
     /// Get a snapshot of current reloadable state
-    pub fn snapshot(&self) -> Arc<ReloadableState> {
-        self.inner.read().unwrap().clone()
+    pub async fn snapshot(&self) -> Arc<ReloadableState> {
+        self.inner.read().await.clone()
     }
 }
 
@@ -151,8 +151,13 @@ async fn login_handler(
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
     let password = body.get("password").and_then(|v| v.as_str()).unwrap_or("");
-    let inner = state.snapshot();
-    let expected = inner.config.server.admin_password.as_deref().unwrap_or("admin");
+    let inner = state.snapshot().await;
+    let expected = match inner.config.server.admin_password.as_deref() {
+        Some(pwd) => pwd.to_string(),
+        None => {
+            return Err::<(), _>((StatusCode::UNAUTHORIZED, "Admin authentication not configured".to_string())).into_response();
+        }
+    };
 
     if password == expected {
         Json(serde_json::json!({ "success": true })).into_response()
@@ -197,7 +202,7 @@ pub async fn start_server(config: AppConfig, config_path: std::path::PathBuf) ->
     });
 
     let state = Arc::new(AppState {
-        inner: std::sync::RwLock::new(reloadable),
+        inner: tokio::sync::RwLock::new(reloadable),
         token_store,
         config_path,
         message_tracer,
@@ -270,7 +275,7 @@ async fn serve_admin(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
 ) -> Response {
-    let inner = state.snapshot();
+    let inner = state.snapshot().await;
 
     // Check if admin_password is configured
     if inner.config.server.admin_password.is_some() {
@@ -358,7 +363,7 @@ async fn get_config_json(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
 ) -> Response {
-    let inner = state.snapshot();
+    let inner = state.snapshot().await;
     if let Err(e) = check_admin_auth(&inner.config, &headers) {
         return e.into_response();
     }
@@ -408,7 +413,7 @@ async fn update_config_json(
     headers: HeaderMap,
     Json(mut new_config): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let inner = state.snapshot();
+    let inner = state.snapshot().await;
     check_admin_auth(&inner.config, &headers)?;
     // Remove null values (TOML doesn't support null)
     remove_null_values(&mut new_config);
@@ -505,7 +510,7 @@ async fn update_config_json(
         router: new_router,
         provider_registry: Arc::new(new_registry),
     });
-    *state.inner.write().unwrap() = new_inner;
+    *state.inner.write().await = new_inner;
 
     info!("✅ Configuration updated and reloaded successfully via admin UI");
 
@@ -523,7 +528,7 @@ async fn reload_config(
     info!("🔄 Configuration reload requested via UI");
 
     // Check admin auth
-    let inner = state.snapshot();
+    let inner = state.snapshot().await;
     if let Err(e) = check_admin_auth(&inner.config, &headers) {
         return e.into_response();
     }
@@ -570,7 +575,7 @@ async fn reload_config(
     });
 
     // 5. Atomic swap (write lock held for microseconds)
-    *state.inner.write().unwrap() = new_inner;
+    *state.inner.write().await = new_inner;
 
     info!("✅ Configuration reloaded successfully");
     Html("<div class='px-4 py-3 rounded-xl bg-green-500/20 border border-green-500/50 text-foreground text-sm'><strong>✅ Configuration reloaded</strong><br/>New settings are now active.</div>").into_response()
@@ -589,7 +594,7 @@ async fn handle_openai_chat_completions(
     let start_time = std::time::Instant::now();
 
     // Get snapshot of reloadable state
-    let inner = state.snapshot();
+    let inner = state.snapshot().await;
 
     // Check API key auth
     check_api_key(&inner.config, &headers)?;
@@ -847,7 +852,7 @@ async fn handle_messages(
     let start_time = std::time::Instant::now();
 
     // Get snapshot of reloadable state
-    let inner = state.snapshot();
+    let inner = state.snapshot().await;
 
     // Check API key auth
     check_api_key(&inner.config, &headers)?;
@@ -1127,7 +1132,7 @@ async fn handle_count_tokens(
     debug!("Received count_tokens request for model: {}", model);
 
     // Get snapshot of reloadable state
-    let inner = state.snapshot();
+    let inner = state.snapshot().await;
 
     // Check API key auth
     check_api_key(&inner.config, &headers)?;
