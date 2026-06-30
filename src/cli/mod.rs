@@ -333,16 +333,14 @@ default = "placeholder-model"
     fn resolve_env_vars(&mut self) -> Result<()> {
         // Resolve server API key
         if let Some(ref key) = self.server.api_key {
-            if key.starts_with('$') {
-                let env_var = &key[1..];
+            if let Some(env_var) = key.strip_prefix('$') {
                 self.server.api_key = std::env::var(env_var).ok();
             }
         }
 
         // Resolve admin password from env var
         if let Some(ref pw) = self.server.admin_password {
-            if pw.starts_with('$') {
-                let env_var = &pw[1..];
+            if let Some(env_var) = pw.strip_prefix('$') {
                 self.server.admin_password = std::env::var(env_var).ok();
             }
         }
@@ -356,8 +354,7 @@ default = "placeholder-model"
 
             // Only resolve env vars for API key auth
             if let Some(ref api_key) = provider.api_key {
-                if api_key.starts_with('$') {
-                    let env_var = &api_key[1..];
+                if let Some(env_var) = api_key.strip_prefix('$') {
                     if let Ok(value) = std::env::var(env_var) {
                         provider.api_key = Some(value);
                     } else {

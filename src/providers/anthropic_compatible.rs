@@ -58,7 +58,10 @@ fn extract_forward_headers(headers: &reqwest::header::HeaderMap) -> HashMap<Stri
 /// Anthropic signatures are long base64 strings (200+ chars typically).
 fn looks_like_anthropic_signature(sig: &str) -> bool {
     use base64::Engine;
-    sig.len() >= 100 && base64::engine::general_purpose::STANDARD.decode(sig).is_ok()
+    // 500 chars ≈ 375 bytes of data; real Anthropic signatures are 500-2000+ chars
+    sig.len() >= 500
+        && sig.contains('=')
+        && base64::engine::general_purpose::STANDARD.decode(sig).is_ok()
 }
 
 /// Proactive: strip thinking blocks that don't look like they came from Anthropic.
@@ -630,7 +633,7 @@ impl AnthropicProvider for AnthropicCompatibleProvider {
 
         // Wrap stream with logging to capture cache statistics
         use crate::providers::streaming::LoggingSseStream;
-        let byte_stream = response.bytes_stream().map_err(|e| ProviderError::HttpError(e));
+        let byte_stream = response.bytes_stream().map_err(ProviderError::HttpError);
         let logging_stream = LoggingSseStream::new(byte_stream, self.name.clone(), request.model.clone());
 
         // Return stream with headers for forwarding
@@ -642,5 +645,352 @@ impl AnthropicProvider for AnthropicCompatibleProvider {
 
     fn supports_model(&self, model: &str) -> bool {
         self.models.iter().any(|m| m.eq_ignore_ascii_case(model))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::Engine;
+    use crate::models::{AnthropicRequest, ContentBlock, KnownContentBlock, Message, MessageContent, SystemPrompt};
+
+    // ---- looks_like_anthropic_signature ----
+
+    #[test]
+    fn test_anthropic_signature_long_valid_base64() {
+        // Generate a valid base64 string >= 500 chars (new threshold)
+        // 376 bytes → 504 base64 chars with == padding (non-multiple-of-3)
+        let long_input = "a".repeat(376);
+        let sig = base64::engine::general_purpose::STANDARD.encode(long_input.as_bytes());
+        assert!(sig.len() >= 500, "encoded sig should be >= 500 chars, got {}", sig.len());
+        assert!(looks_like_anthropic_signature(&sig));
+    }
+
+    #[test]
+    fn test_anthropic_signature_short_returns_false() {
+        // Valid base64 but < 100 chars
+        let short_sig = base64::engine::general_purpose::STANDARD.encode(b"hello world");
+        assert!(short_sig.len() < 100);
+        assert!(!looks_like_anthropic_signature(&short_sig));
+    }
+
+    #[test]
+    fn test_anthropic_signature_non_base64_returns_false() {
+        // 100+ chars but not valid base64
+        let bad_sig = "!@#$%^&*()".repeat(15); // 150 chars, not valid base64
+        assert!(bad_sig.len() >= 100);
+        assert!(!looks_like_anthropic_signature(&bad_sig));
+    }
+
+    #[test]
+    fn test_anthropic_signature_empty_returns_false() {
+        assert!(!looks_like_anthropic_signature(""));
+    }
+
+    // ---- strip_non_anthropic_thinking ----
+
+    fn make_request_with_thinking(signature: Option<&str>) -> AnthropicRequest {
+        let mut raw = serde_json::json!({
+            "thinking": "I think therefore I am",
+            "type": "thinking"
+        });
+        if let Some(sig) = signature {
+            raw.as_object_mut().unwrap().insert("signature".to_string(), serde_json::Value::String(sig.to_string()));
+        }
+
+        AnthropicRequest {
+            model: "claude-3-5-sonnet-20241022".to_string(),
+            messages: vec![Message {
+                role: "assistant".to_string(),
+                content: MessageContent::Blocks(vec![
+                    ContentBlock::Known(KnownContentBlock::Thinking { raw }),
+                    ContentBlock::text("Hello".to_string(), None),
+                ]),
+            }],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            client_headers: std::collections::HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn test_strip_non_anthropic_thinking_removes_invalid_sig() {
+        // Short signature → not Anthropic → should be stripped
+        let mut request = make_request_with_thinking(Some("short-sig"));
+        strip_non_anthropic_thinking(&mut request);
+        // Only the text block should remain
+        if let MessageContent::Blocks(blocks) = &request.messages[0].content {
+            assert_eq!(blocks.len(), 1, "thinking block with non-Anthropic sig should be stripped");
+            assert!(blocks[0].as_text().is_some(), "remaining block should be text");
+        } else {
+            panic!("expected Blocks variant");
+        }
+    }
+
+    #[test]
+    fn test_strip_non_anthropic_thinking_keeps_unsigned() {
+        // No signature → unsigned → should be kept
+        let mut request = make_request_with_thinking(None);
+        strip_non_anthropic_thinking(&mut request);
+        if let MessageContent::Blocks(blocks) = &request.messages[0].content {
+            assert_eq!(blocks.len(), 2, "unsigned thinking block should be kept");
+        } else {
+            panic!("expected Blocks variant");
+        }
+    }
+
+    #[test]
+    fn test_strip_non_anthropic_thinking_keeps_valid_anthropic_sig() {
+        // Long valid base64 signature → looks Anthropic → should be kept
+        let long_input = "a".repeat(376);
+        let sig = base64::engine::general_purpose::STANDARD.encode(long_input.as_bytes());
+        let mut request = make_request_with_thinking(Some(&sig));
+        strip_non_anthropic_thinking(&mut request);
+        if let MessageContent::Blocks(blocks) = &request.messages[0].content {
+            assert_eq!(blocks.len(), 2, "thinking block with valid Anthropic sig should be kept");
+        } else {
+            panic!("expected Blocks variant");
+        }
+    }
+
+    // ---- strip_all_thinking_signatures ----
+
+    #[test]
+    fn test_strip_all_thinking_signatures_removes_sig_field() {
+        let long_input = "a".repeat(80);
+        let sig = base64::engine::general_purpose::STANDARD.encode(long_input.as_bytes());
+        let mut request = make_request_with_thinking(Some(&sig));
+
+        // Before strip: signature field should be present
+        if let MessageContent::Blocks(blocks) = &request.messages[0].content {
+            if let ContentBlock::Known(KnownContentBlock::Thinking { raw }) = &blocks[0] {
+                assert!(raw.get("signature").is_some(), "signature should exist before strip");
+            }
+        }
+
+        strip_all_thinking_signatures(&mut request);
+
+        // After strip: signature field should be gone
+        if let MessageContent::Blocks(blocks) = &request.messages[0].content {
+            if let ContentBlock::Known(KnownContentBlock::Thinking { raw }) = &blocks[0] {
+                assert!(raw.get("signature").is_none(), "signature should be removed after strip");
+            }
+        }
+    }
+
+    // ---- remove_empty_messages ----
+
+    #[test]
+    fn test_remove_empty_messages_text() {
+        let mut request = AnthropicRequest {
+            model: "test".to_string(),
+            messages: vec![
+                Message { role: "user".to_string(), content: MessageContent::Text("hello".to_string()) },
+                Message { role: "user".to_string(), content: MessageContent::Text("".to_string()) },
+            ],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            client_headers: std::collections::HashMap::new(),
+        };
+        remove_empty_messages(&mut request);
+        assert_eq!(request.messages.len(), 1, "empty text message should be removed");
+    }
+
+    #[test]
+    fn test_remove_empty_messages_blocks() {
+        let mut request = AnthropicRequest {
+            model: "test".to_string(),
+            messages: vec![
+                Message { role: "user".to_string(), content: MessageContent::Blocks(vec![ContentBlock::text("hi".to_string(), None)]) },
+                Message { role: "user".to_string(), content: MessageContent::Blocks(vec![]) },
+            ],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            client_headers: std::collections::HashMap::new(),
+        };
+        remove_empty_messages(&mut request);
+        assert_eq!(request.messages.len(), 1, "empty blocks message should be removed");
+    }
+
+    // ---- sanitize_tool_id ----
+
+    #[test]
+    fn test_sanitize_tool_id_valid() {
+        assert_eq!(sanitize_tool_id("abc123_-"), "abc123_-");
+    }
+
+    #[test]
+    fn test_sanitize_tool_id_invalid_chars() {
+        assert_eq!(sanitize_tool_id("tool.id@here"), "tool_id_here");
+    }
+
+    #[test]
+    fn test_sanitize_tool_id_empty() {
+        assert_eq!(sanitize_tool_id(""), "");
+    }
+
+    // ---- sanitize_tool_use_ids ----
+
+    #[test]
+    fn test_sanitize_tool_use_ids_anthropic_target() {
+        let mut request = AnthropicRequest {
+            model: "test".to_string(),
+            messages: vec![Message {
+                role: "assistant".to_string(),
+                content: MessageContent::Blocks(vec![
+                    ContentBlock::tool_use(
+                        "tool.id@here".to_string(),
+                        "my_tool".to_string(),
+                        serde_json::json!({}),
+                    ),
+                ]),
+            }],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            client_headers: std::collections::HashMap::new(),
+        };
+        sanitize_tool_use_ids(&mut request, true);
+        if let MessageContent::Blocks(blocks) = &request.messages[0].content {
+            if let ContentBlock::Known(KnownContentBlock::ToolUse { id, .. }) = &blocks[0] {
+                assert_eq!(id, "tool_id_here", "tool_use id should be sanitized for Anthropic target");
+            } else {
+                panic!("expected ToolUse block");
+            }
+        } else {
+            panic!("expected Blocks variant");
+        }
+    }
+
+    #[test]
+    fn test_sanitize_tool_use_ids_non_anthropic_target() {
+        let original_id = "tool.id@here";
+        let mut request = AnthropicRequest {
+            model: "test".to_string(),
+            messages: vec![Message {
+                role: "assistant".to_string(),
+                content: MessageContent::Blocks(vec![
+                    ContentBlock::tool_use(
+                        original_id.to_string(),
+                        "my_tool".to_string(),
+                        serde_json::json!({}),
+                    ),
+                ]),
+            }],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            client_headers: std::collections::HashMap::new(),
+        };
+        sanitize_tool_use_ids(&mut request, false);
+        if let MessageContent::Blocks(blocks) = &request.messages[0].content {
+            if let ContentBlock::Known(KnownContentBlock::ToolUse { id, .. }) = &blocks[0] {
+                assert_eq!(id, original_id, "tool_use id should NOT be sanitized for non-Anthropic target");
+            } else {
+                panic!("expected ToolUse block");
+            }
+        } else {
+            panic!("expected Blocks variant");
+        }
+    }
+
+    #[test]
+    fn test_sanitize_tool_use_ids_tool_result() {
+        let mut request = AnthropicRequest {
+            model: "test".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Blocks(vec![
+                    ContentBlock::Known(KnownContentBlock::ToolResult {
+                        tool_use_id: "tool.id@here".to_string(),
+                        content: crate::models::ToolResultContent::Text("result".to_string()),
+                        is_error: false,
+                        cache_control: None,
+                    }),
+                ]),
+            }],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            client_headers: std::collections::HashMap::new(),
+        };
+        sanitize_tool_use_ids(&mut request, true);
+        if let MessageContent::Blocks(blocks) = &request.messages[0].content {
+            if let ContentBlock::Known(KnownContentBlock::ToolResult { tool_use_id, .. }) = &blocks[0] {
+                assert_eq!(tool_use_id, "tool_id_here", "tool_use_id should be sanitized for Anthropic target");
+            } else {
+                panic!("expected ToolResult block");
+            }
+        } else {
+            panic!("expected Blocks variant");
+        }
+    }
+
+    // ---- extract_forward_headers ----
+
+    #[test]
+    fn test_extract_forward_headers_empty() {
+        let headers = reqwest::header::HeaderMap::new();
+        let result = extract_forward_headers(&headers);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_extract_forward_headers_with_values() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("anthropic-ratelimit-requests-limit", "10".parse().unwrap());
+        headers.insert("retry-after", "5".parse().unwrap());
+        headers.insert("content-type", "application/json".parse().unwrap()); // not in forward list
+
+        let result = extract_forward_headers(&headers);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result.get("anthropic-ratelimit-requests-limit").unwrap(), "10");
+        assert_eq!(result.get("retry-after").unwrap(), "5");
+        assert!(!result.contains_key("content-type"));
     }
 }

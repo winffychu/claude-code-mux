@@ -324,8 +324,8 @@ impl OpenAIProvider {
                 // Next line should be data: {...}
                 if i + 1 < lines.len() {
                     let data_line = lines[i + 1];
-                    if data_line.starts_with("data: ") {
-                        let json_str = &data_line[6..];  // Skip "data: "
+                    if let Some(json_str) = data_line.strip_prefix("data: ") {
+                        // Skip "data: "
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(json_str) {
                             // Extract both reasoning and message from response.output array
                             // Note: Codex models have reasoning at output[0], message at output[1]
@@ -589,7 +589,7 @@ impl OpenAIProvider {
                                 let result_content = if *is_error {
                                     // Prefix error content so models know not to retry
                                     tracing::debug!("🚨 Tool result is_error=true for {}, prefixing content", tool_use_id);
-                                    format!("[SYSTEM: Tools are disabled during warmup. Do NOT call any tools. Wait for the next user message before attempting any tool use.]\n{}", content.to_string())
+                                    format!("[SYSTEM: Tools are disabled during warmup. Do NOT call any tools. Wait for the next user message before attempting any tool use.]\n{content}", content = content)
                                 } else {
                                     content.to_string()
                                 };
@@ -631,11 +631,9 @@ impl OpenAIProvider {
                                 // Convert Anthropic image format to OpenAI format
                                 let url = if source.r#type == "base64" {
                                     // data:image/{media_type};base64,{data}
-                                    let media_type = source.media_type.as_ref()
-                                        .map(|s| s.as_str())
+                                    let media_type = source.media_type.as_deref()
                                         .unwrap_or("image/png");
-                                    let data = source.data.as_ref()
-                                        .map(|s| s.as_str())
+                                    let data = source.data.as_deref()
                                         .unwrap_or("");
                                     format!("data:{};base64,{}", media_type, data)
                                 } else if let Some(url) = &source.url {
@@ -1150,7 +1148,7 @@ impl OpenAIProvider {
                 }
 
                 // Close all open tool blocks
-                for (_, block_index) in &state.tool_blocks {
+                for block_index in state.tool_blocks.values() {
                     let block_stop = serde_json::json!({
                         "type": "content_block_stop",
                         "index": block_index
@@ -1478,13 +1476,13 @@ impl AnthropicProvider for OpenAIProvider {
             tracing::debug!("Using /v1/responses endpoint for Codex model (streaming): {}", request.model);
             let responses_request = self.transform_to_responses_request(&request)?;
             let body = serde_json::to_value(&responses_request)
-                .map_err(|e| ProviderError::SerializationError(e))?;
+                .map_err(ProviderError::SerializationError)?;
             (format!("{}/responses", base_url), body)
         } else {
             // Use standard /v1/chat/completions endpoint
             let openai_request = self.transform_request(&request)?;
             let body = serde_json::to_value(&openai_request)
-                .map_err(|e| ProviderError::SerializationError(e))?;
+                .map_err(ProviderError::SerializationError)?;
             (format!("{}/chat/completions", base_url), body)
         };
 
@@ -1616,7 +1614,7 @@ impl AnthropicProvider for OpenAIProvider {
                                 let sse_output = Self::transform_openai_chunk_to_anthropic_sse(
                                     &chunk,
                                     &message_id,
-                                    &mut *state.lock().unwrap()
+                                    &mut state.lock().unwrap()
                                 );
 
                                 if !sse_output.is_empty() {
@@ -1669,7 +1667,7 @@ impl AnthropicProvider for OpenAIProvider {
                 }
 
                 // Close all tool blocks
-                for (_, block_index) in &state.tool_blocks {
+                for block_index in state.tool_blocks.values() {
                     let block_stop = serde_json::json!({
                         "type": "content_block_stop",
                         "index": block_index

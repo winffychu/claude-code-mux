@@ -1,5 +1,5 @@
 use super::{AnthropicProvider, ProviderConfig, OpenAIProvider, AnthropicCompatibleProvider, error::ProviderError};
-use super::gemini::GeminiProvider;
+use super::gemini::{GeminiConfig, GeminiProvider};
 use crate::auth::TokenStore;
 use crate::cli::ModelConfig;
 use std::collections::HashMap;
@@ -209,33 +209,33 @@ impl ProviderRegistry {
                         None
                     };
 
-                    Box::new(GeminiProvider::new(
-                        config.name.clone(),
-                        api_key_opt,
-                        config.base_url.clone(),
-                        config.models.clone(),
-                        HashMap::new(), // custom headers
-                        config.oauth_provider.clone(),
-                        token_store.clone(),
-                        None, // No project_id/location for Gemini (AI Studio/OAuth only)
-                        None,
-                    ))
+                    Box::new(GeminiProvider::new(GeminiConfig {
+                        name: config.name.clone(),
+                        api_key: api_key_opt,
+                        base_url: config.base_url.clone(),
+                        models: config.models.clone(),
+                        custom_headers: HashMap::new(),
+                        oauth_provider_id: config.oauth_provider.clone(),
+                        token_store: token_store.clone(),
+                        project_id: None,
+                        location: None,
+                    }))
                 }
 
                 "vertex-ai" => {
                     // Vertex AI provider (separate from Gemini)
                     // Uses Google Cloud Vertex AI with ADC authentication
-                    Box::new(GeminiProvider::new(
-                        config.name.clone(),
-                        None, // No API key for Vertex AI (uses ADC)
-                        config.base_url.clone(),
-                        config.models.clone(),
-                        HashMap::new(), // custom headers
-                        None, // No OAuth for Vertex AI
-                        token_store.clone(),
-                        config.project_id.clone(), // GCP project ID
-                        config.location.clone(),   // GCP location
-                    ))
+                    Box::new(GeminiProvider::new(GeminiConfig {
+                        name: config.name.clone(),
+                        api_key: None,
+                        base_url: config.base_url.clone(),
+                        models: config.models.clone(),
+                        custom_headers: HashMap::new(),
+                        oauth_provider_id: None,
+                        token_store: token_store.clone(),
+                        project_id: config.project_id.clone(),
+                        location: config.location.clone(),
+                    }))
                 }
 
                 other => {

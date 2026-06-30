@@ -16,7 +16,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize OAuth client
     let config = OAuthConfig::anthropic();
-    let token_store = TokenStore::default()?;
+    let token_store = TokenStore::from_default_path()?;
     let oauth_client = OAuthClient::new(config, token_store);
 
     // Generate authorization URL

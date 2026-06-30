@@ -27,7 +27,7 @@ impl PKCEVerifier {
         let mut hasher = Sha256::new();
         hasher.update(verifier.as_bytes());
         let challenge_bytes = hasher.finalize();
-        let challenge = URL_SAFE_NO_PAD.encode(&challenge_bytes);
+        let challenge = URL_SAFE_NO_PAD.encode(challenge_bytes);
 
         Self { verifier, challenge }
     }

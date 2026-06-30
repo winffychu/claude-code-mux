@@ -55,10 +55,7 @@ pub fn is_process_running(pid: u32) -> bool {
     use nix::sys::signal::{kill, Signal};
     use nix::unistd::Pid;
 
-    match kill(Pid::from_raw(pid as i32), Signal::SIGCONT) {
-        Ok(_) => true,
-        Err(_) => false,
-    }
+    kill(Pid::from_raw(pid as i32), Signal::SIGCONT).is_ok()
 }
 
 #[cfg(windows)]

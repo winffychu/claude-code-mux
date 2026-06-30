@@ -84,21 +84,21 @@ impl Router {
             .router
             .auto_map_regex
             .as_ref()
-            .and_then(|pattern| {
+            .map(|pattern| {
                 if pattern.is_empty() {
                     // Empty string: use default Claude pattern
-                    Some(Regex::new(r"^claude-").expect("Invalid default Claude regex"))
+                    Regex::new(r"^claude-").expect("Invalid default Claude regex")
                 } else {
                     // Custom pattern provided
                     match Regex::new(pattern) {
-                        Ok(regex) => Some(regex),
+                        Ok(regex) => regex,
                         Err(e) => {
                             eprintln!(
                                 "Warning: Invalid auto_map_regex pattern '{}': {}",
                                 pattern, e
                             );
                             eprintln!("Falling back to default Claude pattern");
-                            Some(Regex::new(r"^claude-").expect("Invalid default Claude regex"))
+                            Regex::new(r"^claude-").expect("Invalid default Claude regex")
                         }
                     }
                 }
@@ -113,26 +113,22 @@ impl Router {
             .router
             .background_regex
             .as_ref()
-            .and_then(|pattern| {
+            .map(|pattern| {
                 if pattern.is_empty() {
                     // Empty string: use default claude-haiku pattern
-                    Some(
-                        Regex::new(r"(?i)claude.*haiku").expect("Invalid default background regex"),
-                    )
+                    Regex::new(r"(?i)claude.*haiku").expect("Invalid default background regex")
                 } else {
                     // Custom pattern provided
                     match Regex::new(pattern) {
-                        Ok(regex) => Some(regex),
+                        Ok(regex) => regex,
                         Err(e) => {
                             eprintln!(
                                 "Warning: Invalid background_regex pattern '{}': {}",
                                 pattern, e
                             );
                             eprintln!("Falling back to default claude-haiku pattern");
-                            Some(
-                                Regex::new(r"(?i)claude.*haiku")
-                                    .expect("Invalid default background regex"),
-                            )
+                            Regex::new(r"(?i)claude.*haiku")
+                                    .expect("Invalid default background regex")
                         }
                     }
                 }

@@ -27,6 +27,19 @@ pub struct GeminiProvider {
     pub token_store: Option<TokenStore>,
 }
 
+/// Configuration for creating a GeminiProvider
+pub struct GeminiConfig {
+    pub name: String,
+    pub api_key: Option<String>,
+    pub base_url: Option<String>,
+    pub models: Vec<String>,
+    pub custom_headers: HashMap<String, String>,
+    pub oauth_provider_id: Option<String>,
+    pub token_store: Option<TokenStore>,
+    pub project_id: Option<String>,
+    pub location: Option<String>,
+}
+
 /// Remove JSON Schema metadata fields that Gemini API doesn't support
 fn clean_json_schema(value: &mut serde_json::Value) {
     match value {
@@ -57,26 +70,16 @@ fn clean_json_schema(value: &mut serde_json::Value) {
 }
 
 impl GeminiProvider {
-    pub fn new(
-        name: String,
-        api_key: Option<String>,
-        base_url: Option<String>,
-        models: Vec<String>,
-        custom_headers: HashMap<String, String>,
-        oauth_provider_id: Option<String>,
-        token_store: Option<TokenStore>,
-        project_id: Option<String>,
-        location: Option<String>,
-    ) -> Self {
-        let base_url = base_url.unwrap_or_else(|| {
-            if oauth_provider_id.is_some() {
+    pub fn new(config: GeminiConfig) -> Self {
+        let base_url = config.base_url.unwrap_or_else(|| {
+            if config.oauth_provider_id.is_some() {
                 // Code Assist API (OAuth)
                 "https://cloudcode-pa.googleapis.com/v1internal".to_string()
-            } else if project_id.is_some() && location.is_some() {
+            } else if config.project_id.is_some() && config.location.is_some() {
                 // Vertex AI
                 format!(
                     "https://{}-aiplatform.googleapis.com/v1",
-                    location.as_ref().unwrap()
+                    config.location.as_ref().unwrap()
                 )
             } else {
                 // Google AI (API Key)
@@ -85,16 +88,16 @@ impl GeminiProvider {
         });
 
         Self {
-            name,
-            api_key,
+            name: config.name,
+            api_key: config.api_key,
             base_url,
-            models,
+            models: config.models,
             client: Client::new(),
-            custom_headers,
-            project_id,
-            location,
-            oauth_provider_id,
-            token_store,
+            custom_headers: config.custom_headers,
+            project_id: config.project_id,
+            location: config.location,
+            oauth_provider_id: config.oauth_provider_id,
+            token_store: config.token_store,
         }
     }
 
@@ -250,7 +253,7 @@ impl GeminiProvider {
                 let mut function_declarations = Vec::new();
 
                 for tool in anthropic_tools {
-                    let tool_name = tool.name.as_ref().map(|s| s.as_str()).unwrap_or("");
+                    let tool_name = tool.name.as_deref().unwrap_or("");
 
                     match tool_name {
                         "WebSearch" => {
@@ -719,7 +722,7 @@ impl AnthropicProvider for GeminiProvider {
 
             // Return the streaming response
             // The Gemini API returns SSE format, just pass through the stream
-            let stream = response.bytes_stream().map_err(|e| ProviderError::HttpError(e));
+            let stream = response.bytes_stream().map_err(ProviderError::HttpError);
             Ok(StreamResponse {
                 stream: Box::pin(stream),
                 headers: HashMap::new(), // Gemini doesn't have rate limit headers to forward
@@ -791,7 +794,7 @@ impl AnthropicProvider for GeminiProvider {
             }
 
             // Return the streaming response
-            let stream = response.bytes_stream().map_err(|e| ProviderError::HttpError(e));
+            let stream = response.bytes_stream().map_err(ProviderError::HttpError);
             Ok(StreamResponse {
                 stream: Box::pin(stream),
                 headers: HashMap::new(), // Gemini doesn't have rate limit headers to forward
@@ -1003,7 +1006,7 @@ fn parse_retry_delay(duration: &str) -> Option<std::time::Duration> {
     if let Some(ms_str) = duration.strip_suffix("ms") {
         ms_str.parse::<f64>().ok().map(|ms| std::time::Duration::from_millis(ms as u64))
     } else if let Some(s_str) = duration.strip_suffix("s") {
-        s_str.parse::<f64>().ok().map(|s| std::time::Duration::from_secs_f64(s))
+        s_str.parse::<f64>().ok().map(std::time::Duration::from_secs_f64)
     } else {
         None
     }

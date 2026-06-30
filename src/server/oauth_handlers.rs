@@ -156,7 +156,7 @@ pub async fn oauth_exchange(
     if is_gemini {
         tracing::info!("🔍 Gemini provider detected, calling loadCodeAssist to get project ID");
 
-        match oauth_client.load_code_assist(&token.access_token.expose_secret()).await {
+        match oauth_client.load_code_assist(token.access_token.expose_secret()).await {
             Ok(project_id) => {
                 tracing::info!("✅ Got project ID from loadCodeAssist: {}", project_id);
                 token.project_id = Some(project_id);
@@ -190,9 +190,7 @@ pub async fn oauth_list_tokens(
 ) -> Result<Json<Vec<TokenInfo>>, (StatusCode, String)> {
     let all_tokens = state.token_store.all();
 
-    let token_infos: Vec<TokenInfo> = all_tokens
-        .into_iter()
-        .map(|(_, token)| TokenInfo {
+    let token_infos: Vec<TokenInfo> = all_tokens.into_values().map(|token| TokenInfo {
             provider_id: token.provider_id.clone(),
             expires_at: token.expires_at.to_rfc3339(),
             is_expired: token.is_expired(),

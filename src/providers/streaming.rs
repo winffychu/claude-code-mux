@@ -281,11 +281,7 @@ where
 
                 // Build cache info string if caching was used
                 let cache_info = if *this.cache_creation > 0 || *this.cache_read > 0 {
-                    let cache_pct = if total_input > 0 {
-                        (*this.cache_read * 100) / total_input
-                    } else {
-                        0
-                    };
+                    let cache_pct = (*this.cache_read * 100).checked_div(total_input).unwrap_or(0);
                     format!(" cache:{}%", cache_pct)
                 } else {
                     String::new()

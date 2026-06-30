@@ -52,13 +52,13 @@ impl AppState {
 const RECENT_REQUESTS_WINDOW: usize = 20;
 
 /// Write routing information to file for statusline script
-fn write_routing_info(model: &str, provider: &str, route_type: &RouteType) {
+async fn write_routing_info(model: &str, provider: &str, route_type: &RouteType) {
     if let Some(home) = dirs::home_dir() {
         let file_path = home.join(".claude-code-mux/last_routing.json");
 
         // Read existing recent requests history
         let mut recent: Vec<String> = Vec::new();
-        if let Ok(existing_content) = std::fs::read_to_string(&file_path) {
+        if let Ok(existing_content) = tokio::fs::read_to_string(&file_path).await {
             if let Ok(existing) = serde_json::from_str::<serde_json::Value>(&existing_content) {
                 if let Some(items) = existing.get("recent").and_then(|t| t.as_array()) {
                     for item in items {
@@ -85,7 +85,7 @@ fn write_routing_info(model: &str, provider: &str, route_type: &RouteType) {
         });
 
         if let Ok(json) = serde_json::to_string(&routing_info) {
-            if let Err(e) = std::fs::write(file_path, json) {
+            if let Err(e) = tokio::fs::write(file_path, json).await {
                 tracing::debug!("Failed to write routing info: {}", e);
             }
         } else {
@@ -172,7 +172,7 @@ pub async fn start_server(config: AppConfig, config_path: std::path::PathBuf) ->
     let router = Router::new(config.clone());
 
     // Initialize OAuth token store FIRST (needed by provider registry)
-    let token_store = TokenStore::default()
+    let token_store = TokenStore::from_default_path()
         .map_err(|e| anyhow::anyhow!("Failed to initialize token store: {}", e))?;
 
     let existing_tokens = token_store.list_providers();
@@ -701,7 +701,7 @@ async fn handle_openai_chat_completions(
 
                 // Write routing info immediately on first attempt
                 if idx == 0 {
-                    write_routing_info(&mapping.actual_model, &mapping.provider, &decision.route_type);
+                    write_routing_info(&mapping.actual_model, &mapping.provider, &decision.route_type).await;
                 }
 
                 match provider.send_message(anthropic_request.clone()).await {
@@ -713,7 +713,7 @@ async fn handle_openai_chat_completions(
 
                         // Write routing info on fallback success (idx==0 already wrote above)
                         if idx > 0 {
-                            write_routing_info(&mapping.actual_model, &mapping.provider, &decision.route_type);
+                            write_routing_info(&mapping.actual_model, &mapping.provider, &decision.route_type).await;
                         }
 
                         // Transform Anthropic response to OpenAI format
@@ -736,11 +736,11 @@ async fn handle_openai_chat_completions(
         }
 
         error!("❌ All provider mappings failed for model: {}", decision.model_name);
-        return Err(AppError::ProviderError(format!(
+        Err(AppError::ProviderError(format!(
             "All {} provider mappings failed for model: {}",
             sorted_mappings.len(),
             decision.model_name
-        )));
+        )))
     } else {
         // No model mapping found, try direct provider registry lookup (backward compatibility)
         if let Ok(provider) = inner.provider_registry.get_provider_for_model(&decision.model_name) {
@@ -763,10 +763,10 @@ async fn handle_openai_chat_completions(
         }
 
         error!("❌ No model mapping or provider found for model: {}", decision.model_name);
-        return Err(AppError::ProviderError(format!(
+        Err(AppError::ProviderError(format!(
             "No model mapping or provider found for model: {}",
             decision.model_name
-        )));
+        )))
     }
 }
 
@@ -999,7 +999,7 @@ async fn handle_messages(
 
                 // Write routing info immediately on first attempt
                 if idx == 0 {
-                    write_routing_info(&mapping.actual_model, &mapping.provider, &decision.route_type);
+                    write_routing_info(&mapping.actual_model, &mapping.provider, &decision.route_type).await;
                 }
 
                 if is_streaming {
@@ -1008,7 +1008,7 @@ async fn handle_messages(
                         Ok(stream_response) => {
                             // Write routing info on fallback success (idx==0 already wrote above)
                             if idx > 0 {
-                                write_routing_info(&mapping.actual_model, &mapping.provider, &decision.route_type);
+                                write_routing_info(&mapping.actual_model, &mapping.provider, &decision.route_type).await;
                             }
 
                             // Convert provider stream to HTTP response
@@ -1016,7 +1016,7 @@ async fn handle_messages(
                             // We pass them through as-is without wrapping
                             let body_stream = stream_response.stream.map_err(|e| {
                                 error!("Stream error: {}", e);
-                                std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
+                                std::io::Error::other(e.to_string())
                             });
 
                             let body = Body::from_stream(body_stream);
@@ -1059,7 +1059,7 @@ async fn handle_messages(
 
                             // Write routing info on fallback success (idx==0 already wrote above)
                             if idx > 0 {
-                                write_routing_info(&mapping.actual_model, &mapping.provider, &decision.route_type);
+                                write_routing_info(&mapping.actual_model, &mapping.provider, &decision.route_type).await;
                             }
 
                             return Ok(Json(response).into_response());
@@ -1078,11 +1078,11 @@ async fn handle_messages(
         }
 
         error!("❌ All provider mappings failed for model: {}", decision.model_name);
-        return Err(AppError::ProviderError(format!(
+        Err(AppError::ProviderError(format!(
             "All {} provider mappings failed for model: {}",
             sorted_mappings.len(),
             decision.model_name
-        )));
+        )))
     } else {
         // No model mapping found, try direct provider registry lookup (backward compatibility)
         if let Ok(provider) = inner.provider_registry.get_provider_for_model(&decision.model_name) {
@@ -1115,10 +1115,10 @@ async fn handle_messages(
         }
 
         error!("❌ No model mapping or provider found for model: {}", decision.model_name);
-        return Err(AppError::ProviderError(format!(
+        Err(AppError::ProviderError(format!(
             "No model mapping or provider found for model: {}",
             decision.model_name
-        )));
+        )))
     }
 }
 
@@ -1212,11 +1212,11 @@ async fn handle_count_tokens(
         }
 
         error!("❌ All provider mappings failed for token counting: {}", decision.model_name);
-        return Err(AppError::ProviderError(format!(
+        Err(AppError::ProviderError(format!(
             "All {} provider mappings failed for token counting: {}",
             sorted_mappings.len(),
             decision.model_name
-        )));
+        )))
     } else {
         // No model mapping found, try direct provider registry lookup (backward compatibility)
         if let Ok(provider) = inner.provider_registry.get_provider_for_model(&decision.model_name) {
@@ -1236,10 +1236,10 @@ async fn handle_count_tokens(
         }
 
         error!("❌ No model mapping or provider found for token counting: {}", decision.model_name);
-        return Err(AppError::ProviderError(format!(
+        Err(AppError::ProviderError(format!(
             "No model mapping or provider found for token counting: {}",
             decision.model_name
-        )));
+        )))
     }
 }
 

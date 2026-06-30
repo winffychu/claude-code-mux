@@ -72,20 +72,20 @@ pub enum ToolResultContent {
     Blocks(Vec<ToolResultBlock>),
 }
 
-impl ToolResultContent {
-    /// Convert to string (for OpenAI compatibility)
-    pub fn to_string(&self) -> String {
+impl std::fmt::Display for ToolResultContent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ToolResultContent::Text(s) => s.clone(),
+            ToolResultContent::Text(s) => write!(f, "{}", s),
             ToolResultContent::Blocks(blocks) => {
-                blocks.iter()
-                    .filter_map(|block| match block {
-                        ToolResultBlock::Known(KnownToolResultBlock::Text { text }) => Some(text.clone()),
-                        ToolResultBlock::Known(KnownToolResultBlock::Image { .. }) => Some("[Image]".to_string()),
-                        ToolResultBlock::Unknown(_) => Some("[Unknown]".to_string()),
+                let s = blocks.iter()
+                    .map(|block| match block {
+                        ToolResultBlock::Known(KnownToolResultBlock::Text { text }) => text.clone(),
+                        ToolResultBlock::Known(KnownToolResultBlock::Image { .. }) => "[Image]".to_string(),
+                        ToolResultBlock::Unknown(_) => "[Unknown]".to_string(),
                     })
                     .collect::<Vec<_>>()
-                    .join("\n")
+                    .join("\n");
+                write!(f, "{}", s)
             }
         }
     }

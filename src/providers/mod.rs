@@ -71,18 +71,15 @@ pub trait AnthropicProvider: Send + Sync {
 /// Authentication type for providers
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum AuthType {
     /// API key authentication
+    #[default]
     ApiKey,
     /// OAuth 2.0 authentication
     OAuth,
 }
 
-impl Default for AuthType {
-    fn default() -> Self {
-        AuthType::ApiKey
-    }
-}
 
 /// Provider configuration from TOML
 #[derive(Debug, Clone, Serialize, Deserialize)]
