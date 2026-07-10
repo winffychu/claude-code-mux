@@ -1363,7 +1363,7 @@ impl AnthropicProvider for OpenAIProvider {
             let req_builder = crate::headers::merge_forward_headers(
                 req_builder,
                 &request.forward_headers,
-                &["authorization", "content-type", "user-agent", "origin", "referer", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "chatgpt-account-id"],
+                &["authorization", "content-type", "user-agent", "origin", "referer", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "openai-beta", "chatgpt-account-id", "originator"],
             );
 
             let response = req_builder

@@ -107,4 +107,163 @@ mod tests {
             "myapp/1.0"
         );
     }
+
+    // ===== P1: BLOCK_LIST full coverage =====
+
+    #[test]
+    fn test_extract_client_forward_headers_block_list_all() {
+        // Test every single BLOCK_LIST entry is filtered out
+        let mut headers = HeaderMap::new();
+        let blocked = [
+            "host",
+            "content-length",
+            "transfer-encoding",
+            "connection",
+            "upgrade",
+            "cookie",
+            "set-cookie",
+            "proxy-authorization",
+            "x-provider",
+            "x-forwarded-for",
+            "x-real-ip",
+            "via",
+            "forwarded",
+        ];
+        for key in &blocked {
+            headers.insert(
+                axum::http::HeaderName::from_lowercase(key.as_bytes()).unwrap(),
+                "value".parse().unwrap(),
+            );
+        }
+        // Also add a non-blocked header to ensure it passes through
+        headers.insert("x-custom-header", "keep-me".parse().unwrap());
+
+        let result = extract_client_forward_headers(&headers);
+        let keys: Vec<&str> = result.iter().map(|(k, _)| k.as_str()).collect();
+
+        // None of the BLOCK_LIST entries should appear
+        for key in &blocked {
+            assert!(
+                !keys.contains(key),
+                "BLOCK_LIST entry '{}' should have been filtered, but it passed through",
+                key
+            );
+        }
+        // The non-blocked custom header should pass
+        assert!(keys.contains(&"x-custom-header"));
+    }
+
+    #[test]
+    fn test_extract_client_forward_headers_empty() {
+        // Empty HeaderMap → empty result
+        let headers = HeaderMap::new();
+        let result = extract_client_forward_headers(&headers);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_extract_client_forward_headers_all_allowed() {
+        // Mix of common allowed headers → all pass through
+        let mut headers = HeaderMap::new();
+        headers.insert("user-agent", "test/1.0".parse().unwrap());
+        headers.insert("anthropic-beta", "prompt-caching".parse().unwrap());
+        headers.insert("x-request-id", "req-123".parse().unwrap());
+        headers.insert("accept", "application/json".parse().unwrap());
+
+        let result = extract_client_forward_headers(&headers);
+        let keys: Vec<&str> = result.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(keys.len(), 4);
+        assert!(keys.contains(&"user-agent"));
+        assert!(keys.contains(&"anthropic-beta"));
+        assert!(keys.contains(&"x-request-id"));
+        assert!(keys.contains(&"accept"));
+    }
+
+    #[test]
+    fn test_extract_client_forward_headers_case_insensitive() {
+        // Headers are case-insensitive in HTTP; extract_client_forward_headers
+        // lowercases the key for BLOCK_LIST comparison
+        let mut headers = HeaderMap::new();
+        headers.insert("Host", "example.com".parse().unwrap()); // Capital H
+        headers.insert("COOKIE", "a=1".parse().unwrap()); // All caps
+        headers.insert("X-Custom", "val".parse().unwrap()); // Mixed
+
+        let result = extract_client_forward_headers(&headers);
+        let keys: Vec<&str> = result.iter().map(|(k, _)| k.as_str()).collect();
+        // Both Host and COOKIE should be filtered (case-insensitive BLOCK_LIST match)
+        // The keys in result are already lowercased
+        assert!(!keys.contains(&"host"));
+        assert!(!keys.contains(&"cookie"));
+        // X-Custom should pass through as "x-custom"
+        assert!(keys.contains(&"x-custom"));
+    }
+
+    // ===== P1: merge_forward_headers edge cases =====
+
+    #[test]
+    fn test_merge_forward_headers_empty_forward() {
+        // Empty forward_headers → no headers added, existing untouched
+        let forward: Vec<(String, String)> = vec![];
+        let client = reqwest::Client::new();
+        let rb = client.post("http://localhost");
+        let rb = merge_forward_headers(rb, &forward, &["content-type"]);
+        let req = rb.build().unwrap();
+        // content-type set by reqwest default (or none), no crash
+        let headers = req.headers();
+        // No custom headers should have been added
+        assert!(headers.get("x-custom").is_none());
+        assert!(headers.get("x-trace").is_none());
+    }
+
+    #[test]
+    fn test_merge_forward_headers_empty_existing_keys() {
+        // Empty existing_keys → all forward headers pass through
+        let forward = vec![
+            ("authorization".to_string(), "Bearer test".to_string()),
+            ("x-api-key".to_string(), "test-key".to_string()),
+            ("x-custom".to_string(), "val".to_string()),
+        ];
+        let client = reqwest::Client::new();
+        let rb = client.post("http://localhost");
+        let rb = merge_forward_headers(rb, &forward, &[]); // empty existing_keys
+        let req = rb.build().unwrap();
+        let headers = req.headers();
+        // All forward headers should be present (nothing protected)
+        assert_eq!(
+            headers.get("authorization").unwrap().to_str().unwrap(),
+            "Bearer test"
+        );
+        assert_eq!(
+            headers.get("x-api-key").unwrap().to_str().unwrap(),
+            "test-key"
+        );
+        assert_eq!(headers.get("x-custom").unwrap().to_str().unwrap(), "val");
+    }
+
+    #[test]
+    fn test_merge_forward_headers_both_empty() {
+        // Both forward_headers and existing_keys empty → no-op
+        let forward: Vec<(String, String)> = vec![];
+        let client = reqwest::Client::new();
+        let rb = client.post("http://localhost");
+        let rb = merge_forward_headers(rb, &forward, &[]);
+        let req = rb.build().unwrap();
+        // Should not crash, req should be buildable
+        assert_eq!(req.method(), reqwest::Method::POST);
+    }
+
+    #[test]
+    fn test_merge_forward_headers_existing_keys_case_insensitive() {
+        // existing_keys uses lowercase, forward key is uppercase → should still be protected
+        let forward = vec![("Authorization".to_string(), "Bearer x".to_string())];
+        let client = reqwest::Client::new();
+        let rb = client.post("http://localhost");
+        let rb = merge_forward_headers(rb, &forward, &["authorization"]);
+        let req = rb.build().unwrap();
+        let headers = req.headers();
+        // "Authorization" in forward should be skipped because existing_keys contains "authorization"
+        // (comparison is case-insensitive)
+        assert!(headers.get("authorization").is_none());
+        assert!(headers.get("Authorization").is_none());
+    }
 }

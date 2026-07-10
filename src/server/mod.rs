@@ -918,6 +918,7 @@ async fn handle_count_tokens(
         stream: None,
         metadata: None,
         forward_headers: forward_headers.clone(),
+        token_count: None,
     };
     let decision = inner
         .router
