@@ -408,6 +408,9 @@ async fn handle_openai_chat_completions(
     let mut anthropic_request = openai_compat::transform_openai_to_anthropic(openai_request)
         .map_err(|e| AppError::ParseError(format!("Failed to transform OpenAI request: {}", e)))?;
 
+    // Extract client headers for forwarding to upstream provider
+    anthropic_request.forward_headers = crate::headers::extract_client_forward_headers(&headers);
+
     // 2. Route the request (may modify system prompt to remove CCM-SUBAGENT-MODEL tag)
     let decision = inner
         .router
@@ -640,6 +643,9 @@ async fn handle_messages(
             }
             AppError::ParseError(format!("Invalid request format: {}", e))
         })?;
+
+    // Extract client headers for forwarding to upstream provider
+    request_for_routing.forward_headers = crate::headers::extract_client_forward_headers(&headers);
 
     // 2. Route the request (may modify system prompt to remove CCM-SUBAGENT-MODEL tag)
     let decision = inner
@@ -881,6 +887,7 @@ async fn handle_messages(
 /// Handle /v1/messages/count_tokens requests
 async fn handle_count_tokens(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(request_json): Json<serde_json::Value>,
 ) -> Result<Response, AppError> {
     let model = request_json.get("model").and_then(|m| m.as_str()).unwrap_or("unknown");
@@ -891,8 +898,12 @@ async fn handle_count_tokens(
 
     // 1. Parse as CountTokensRequest first
     use crate::models::CountTokensRequest;
-    let count_request: CountTokensRequest = serde_json::from_value(request_json.clone())
+    let mut count_request: CountTokensRequest = serde_json::from_value(request_json.clone())
         .map_err(|e| AppError::ParseError(format!("Invalid count_tokens request format: {}", e)))?;
+
+    // Extract client headers for forwarding to upstream provider
+    let forward_headers = crate::headers::extract_client_forward_headers(&headers);
+    count_request.forward_headers = forward_headers.clone();
 
     // 2. Create a minimal AnthropicRequest for routing
     let mut routing_request = AnthropicRequest {
@@ -908,6 +919,7 @@ async fn handle_count_tokens(
         stop_sequences: None,
         stream: None,
         metadata: None,
+        forward_headers: forward_headers.clone(),
     };
     let decision = inner
         .router

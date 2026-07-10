@@ -25,6 +25,8 @@ pub struct AnthropicRequest {
     pub system: Option<SystemPrompt>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<Tool>>,
+    #[serde(skip)]
+    pub forward_headers: Vec<(String, String)>,
 }
 
 /// Message in the conversation
@@ -250,6 +252,8 @@ pub struct CountTokensRequest {
     pub system: Option<SystemPrompt>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<Tool>>,
+    #[serde(skip)]
+    pub forward_headers: Vec<(String, String)>,
 }
 
 /// Response for token counting

@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod cli;
+pub mod headers;
 pub mod message_tracing;
 pub mod models;
 pub mod pid;

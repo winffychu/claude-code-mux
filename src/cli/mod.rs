@@ -128,6 +128,9 @@ pub struct RouterConfig {
     /// Prompt-based routing rules. Routes to specific models when patterns match user prompt.
     #[serde(default)]
     pub prompt_rules: Vec<PromptRule>,
+    /// Router rules: condition-based or model-prefix rules with rewrites
+    #[serde(default)]
+    pub rules: Vec<RouterRule>,
 }
 
 /// Prompt-based routing rule
@@ -142,6 +145,114 @@ pub struct PromptRule {
     /// Strip the matched phrase from the prompt (default: false)
     #[serde(default)]
     pub strip_match: bool,
+}
+
+/// Router Rule type: condition-based or model-prefix matching
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "type")]
+pub enum RouterRuleType {
+    /// Condition-based rule: compare a request field against a value
+    #[serde(rename = "condition")]
+    Condition {
+        #[serde(flatten)]
+        condition: RuleCondition,
+    },
+    /// Model-prefix rule: match if the model name starts with a prefix
+    #[serde(rename = "model-prefix")]
+    ModelPrefix {
+        prefix: String,
+    },
+}
+
+/// Condition for a router rule
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RuleCondition {
+    /// Path to the value to compare (e.g. "request.body.model", "request.header.x-custom")
+    pub left: String,
+    /// Comparison operator
+    pub operator: RuleOperator,
+    /// Value to compare against
+    pub right: String,
+}
+
+/// Comparison operators for router rules
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum RuleOperator {
+    #[serde(rename = "==")]
+    Eq,
+    #[serde(rename = "!=")]
+    Ne,
+    #[serde(rename = ">")]
+    Gt,
+    #[serde(rename = ">=")]
+    Ge,
+    #[serde(rename = "<")]
+    Lt,
+    #[serde(rename = "<=")]
+    Le,
+    Contains,
+    #[serde(rename = "contains-deep")]
+    ContainsDeep,
+    #[serde(rename = "not-contains")]
+    NotContains,
+    #[serde(rename = "starts-with")]
+    StartsWith,
+}
+
+/// Rewrite operation to apply when a rule matches
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum RewriteOperation {
+    Set,
+    Delete,
+    ArrayAppend,
+    ArrayPrepend,
+    ArrayRemove,
+    ArrayReplace,
+}
+
+/// A rewrite action to apply to the request when a rule matches
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RouterRuleRewrite {
+    /// Path to the field to modify (e.g. "request.body.model")
+    pub key: String,
+    /// Optional match condition for array operations
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r#match: Option<String>,
+    /// Operation to perform (default: "set")
+    #[serde(default = "default_rewrite_operation")]
+    pub operation: RewriteOperation,
+    /// Value to set/append/replace with
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+}
+
+fn default_rewrite_operation() -> RewriteOperation {
+    RewriteOperation::Set
+}
+
+/// A single router rule
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RouterRule {
+    /// Unique identifier
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// Human-readable name
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Rule type and its matching logic
+    #[serde(flatten)]
+    pub rule_type: RouterRuleType,
+    /// Whether this rule is enabled (default: true)
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Rewrites to apply when the rule matches
+    #[serde(default)]
+    pub rewrite: Vec<RouterRuleRewrite>,
+    /// Convenience: set model directly (equivalent to rewrite key=request.body.model operation=set)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 /// Model configuration with 1:N provider mappings

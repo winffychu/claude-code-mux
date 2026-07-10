@@ -1,8 +1,10 @@
 use crate::cli::AppConfig;
+use crate::cli::{RouterRule, RouterRuleType, RuleOperator, RouterRuleRewrite, RewriteOperation};
 use crate::models::{AnthropicRequest, MessageContent, RouteDecision, RouteType, SystemPrompt};
 use anyhow::Result;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use serde_json::Value;
 use tracing::{debug, info};
 
 /// Regex to detect capture group references ($1, $name, ${1}, ${name})
@@ -31,6 +33,7 @@ pub struct Router {
     auto_map_regex: Option<Regex>,
     background_regex: Option<Regex>,
     prompt_rules: Vec<CompiledPromptRule>,
+    rules: Vec<RouterRule>,
 }
 
 impl Router {
@@ -130,11 +133,14 @@ impl Router {
             info!("📝 Loaded {} prompt routing rules", prompt_rules.len());
         }
 
+        let rules: Vec<RouterRule> = config.router.rules.clone();
+
         Self {
             config,
             auto_map_regex,
             background_regex,
             prompt_rules,
+            rules,
         }
     }
 
@@ -199,7 +205,18 @@ impl Router {
             });
         }
 
-        // 4. Prompt Rules (pattern matching on user prompt)
+        // 4. Router Rules (condition + model-prefix → rewrite)
+        // New: declarative rules with condition matching and request rewriting
+        if let Some(model) = self.match_router_rule(request) {
+            debug!("📋 Routing to model via router rule: {}", model);
+            return Ok(RouteDecision {
+                model_name: model,
+                route_type: RouteType::PromptRule,
+                matched_prompt: None,
+            });
+        }
+
+        // 5. Prompt Rules (pattern matching on user prompt)
         // NOTE: Checked AFTER background to ensure background tasks use cheaper models
         if let Some((model, matched_text)) = self.match_prompt_rule(request) {
             debug!("📝 Routing to model via prompt rule match: {}", model);
@@ -230,6 +247,197 @@ impl Router {
             route_type: RouteType::Default,
             matched_prompt: None,
         })
+    }
+
+    /// Match router rules: iterate rules in order, return model if a rule matches.
+    /// Applies rewrites (including model rewrite) to the request in-place.
+    fn match_router_rule(&self, request: &mut AnthropicRequest) -> Option<String> {
+        for rule in &self.rules {
+            if !rule.enabled {
+                continue;
+            }
+
+            let matched = match &rule.rule_type {
+                RouterRuleType::Condition { condition } => {
+                    self.match_condition(condition, request)
+                }
+                RouterRuleType::ModelPrefix { prefix } => {
+                    request.model.starts_with(prefix)
+                }
+            };
+
+            if matched {
+                // Apply rewrites
+                for rewrite in &rule.rewrite {
+                    self.apply_rewrite(rewrite, request);
+                }
+
+                // Convenience: if rule.model is set, it's equivalent to rewriting request.body.model
+                if let Some(ref model) = rule.model {
+                    debug!("📋 Router rule matched, setting model to '{}'", model);
+                    request.model = model.clone();
+                    return Some(model.clone());
+                }
+
+                // If a rewrite changed the model, return the new model
+                // (the rewrite would have modified request.model directly)
+                return Some(request.model.clone());
+            }
+        }
+        None
+    }
+
+    /// Evaluate a condition against the request
+    fn match_condition(&self, condition: &crate::cli::RuleCondition, request: &AnthropicRequest) -> bool {
+        // Resolve the left path to a value
+        let left_value = self.resolve_path_value(&condition.left, request);
+
+        match left_value {
+            Some(val) => {
+                let left_str = match &val {
+                    Value::String(s) => s.clone(),
+                    Value::Number(n) => n.to_string(),
+                    Value::Bool(b) => b.to_string(),
+                    _ => val.to_string(),
+                };
+
+                match condition.operator {
+                    RuleOperator::Eq => left_str == condition.right,
+                    RuleOperator::Ne => left_str != condition.right,
+                    RuleOperator::Gt | RuleOperator::Ge | RuleOperator::Lt | RuleOperator::Le => {
+                        // Numeric comparison
+                        let left_num: f64 = match left_str.parse() {
+                            Ok(n) => n,
+                            Err(_) => return false,
+                        };
+                        let right_num: f64 = match condition.right.parse() {
+                            Ok(n) => n,
+                            Err(_) => return false,
+                        };
+                        match condition.operator {
+                            RuleOperator::Gt => left_num > right_num,
+                            RuleOperator::Ge => left_num >= right_num,
+                            RuleOperator::Lt => left_num < right_num,
+                            RuleOperator::Le => left_num <= right_num,
+                            _ => unreachable!(),
+                        }
+                    }
+                    RuleOperator::Contains => left_str.contains(&condition.right),
+                    RuleOperator::ContainsDeep => {
+                        self.contains_deep(&val, &condition.right)
+                    }
+                    RuleOperator::NotContains => !left_str.contains(&condition.right),
+                    RuleOperator::StartsWith => left_str.starts_with(&condition.right),
+                }
+            }
+            None => false,
+        }
+    }
+
+    /// Deep search: recursively check if any string value in a JSON value contains the needle
+    fn contains_deep(&self, value: &Value, needle: &str) -> bool {
+        match value {
+            Value::String(s) => s.contains(needle),
+            Value::Array(arr) => arr.iter().any(|v| self.contains_deep(v, needle)),
+            Value::Object(obj) => obj.values().any(|v| self.contains_deep(v, needle)),
+            Value::Number(n) => n.to_string().contains(needle),
+            Value::Bool(b) => b.to_string().contains(needle),
+            _ => false,
+        }
+    }
+
+    /// Resolve a path like "request.body.model" or "request.body.messages.0.content" to a Value.
+    /// Supports: request.body.* (serialized AnthropicRequest fields), request.model (shortcut)
+    fn resolve_path_value(&self, path: &str, request: &AnthropicRequest) -> Option<Value> {
+        // Normalize: strip "request." prefix
+        let path = path.strip_prefix("request.").unwrap_or(path);
+
+        // Handle request.model / request.body.model (same thing in CCM)
+        if path == "model" || path == "body.model" {
+            return Some(Value::String(request.model.clone()));
+        }
+
+        // Handle request.body.messages
+        if path == "body.messages" || path == "messages" {
+            return serde_json::to_value(&request.messages).ok();
+        }
+
+        // Handle request.body.messages.<index>.content
+        // e.g. "body.messages.0.content" or "messages.0.content"
+        let parts: Vec<&str> = path.split('.').collect();
+        if parts.len() >= 3 && (parts[0] == "body" && parts[1] == "messages" || parts[0] == "messages") {
+            let idx_offset = if parts[0] == "body" { 2 } else { 1 };
+            let msg_idx: usize = parts[idx_offset - 1].parse().ok()?;
+            if msg_idx >= request.messages.len() {
+                return None;
+            }
+            let msg = &request.messages[msg_idx];
+            // Match content
+            let field = parts.get(idx_offset)?;
+            if *field == "content" {
+                match &msg.content {
+                    crate::models::MessageContent::Text(t) => return Some(Value::String(t.clone())),
+                    crate::models::MessageContent::Blocks(blocks) => {
+                        return serde_json::to_value(blocks).ok();
+                    }
+                }
+            }
+        }
+
+        // Handle request.body.system
+        if path == "body.system" || path == "system" {
+            return serde_json::to_value(&request.system).ok();
+        }
+
+        // Handle request.body.tools
+        if path == "body.tools" || path == "tools" {
+            return serde_json::to_value(&request.tools).ok();
+        }
+
+        // Fallback: serialize the whole request and navigate
+        let body = serde_json::to_value(request).ok()?;
+        let mut current = &body;
+        for part in parts {
+            // Try as object key first
+            if let Ok(part_as_num) = part.parse::<usize>() {
+                if let Some(arr) = current.as_array() {
+                    if part_as_num < arr.len() {
+                        current = &arr[part_as_num];
+                        continue;
+                    }
+                }
+            }
+            current = current.get(part)?;
+        }
+        Some(current.clone())
+    }
+
+    /// Apply a rewrite operation to the request
+    fn apply_rewrite(&self, rewrite: &RouterRuleRewrite, request: &mut AnthropicRequest) {
+        let path = rewrite.key.strip_prefix("request.").unwrap_or(&rewrite.key);
+
+        // Only support rewriting request.body.model (the main use case)
+        if path == "body.model" || path == "model" {
+            match rewrite.operation {
+                RewriteOperation::Set => {
+                    if let Some(ref value) = rewrite.value {
+                        debug!("📋 Rewrite: model '{}' → '{}'", request.model, value);
+                        request.model = value.clone();
+                    }
+                }
+                RewriteOperation::Delete => {
+                    // Can't delete model (required field), but reset to default
+                    request.model = self.config.router.default.clone();
+                }
+                _ => {
+                    debug!("📋 Rewrite operation {:?} not supported for model field", rewrite.operation);
+                }
+            }
+            return;
+        }
+
+        // Other rewrite targets not yet implemented
+        debug!("📋 Rewrite to path '{}' not yet implemented (operation: {:?})", path, rewrite.operation);
     }
 
     /// Check if request has web_search tool (tool-based detection)
@@ -642,6 +850,7 @@ mod tests {
                 auto_map_regex: None,   // Use default Claude pattern
                 background_regex: None, // Use default claude-haiku pattern
                 prompt_rules: vec![],   // No prompt rules by default
+                rules: vec![],          // No router rules by default
             },
             providers: vec![],
             models: vec![],
@@ -665,6 +874,7 @@ mod tests {
             metadata: None,
             system: None,
             tools: None,
+            forward_headers: vec![],
         }
     }
 
@@ -1028,6 +1238,7 @@ mod tests {
             metadata: None,
             system: None,
             tools: None,
+            forward_headers: vec![],
         };
 
         let decision = router.route(&mut request).unwrap();
@@ -1082,6 +1293,7 @@ mod tests {
             metadata: None,
             system: None,
             tools: None,
+            forward_headers: vec![],
         };
 
         let decision = router.route(&mut request).unwrap();
@@ -1147,6 +1359,7 @@ mod tests {
             metadata: None,
             system: None,
             tools: None,
+            forward_headers: vec![],
         };
 
         let decision = router.route(&mut request).unwrap();
@@ -1160,5 +1373,242 @@ mod tests {
         } else {
             panic!("Expected text content in first message");
         }
+    }
+
+    #[test]
+    fn test_router_rule_condition_eq_model() {
+        let config = create_test_config();
+        let rules = vec![RouterRule {
+            id: Some("test-eq".to_string()),
+            name: Some("Equal model test".to_string()),
+            rule_type: RouterRuleType::Condition {
+                condition: crate::cli::RuleCondition {
+                    left: "request.body.model".to_string(),
+                    operator: RuleOperator::Eq,
+                    right: "gpt-4".to_string(),
+                },
+            },
+            enabled: true,
+            rewrite: vec![],
+            model: Some("claude-sonnet-4".to_string()),
+        }];
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules,
+                ..config.router
+            },
+            ..config
+        });
+
+        let mut request = AnthropicRequest {
+            model: "gpt-4".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("hello".to_string()),
+            }],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            forward_headers: vec![],
+        };
+
+        let decision = router.route(&mut request).unwrap();
+        assert_eq!(decision.model_name, "claude-sonnet-4");
+    }
+
+    #[test]
+    fn test_router_rule_model_prefix() {
+        let config = create_test_config();
+        // Use auto_map_regex = Some("".to_string()) to disable auto-mapping
+        let rules = vec![RouterRule {
+            id: Some("test-prefix".to_string()),
+            name: Some("Prefix test".to_string()),
+            rule_type: RouterRuleType::ModelPrefix {
+                prefix: "claude-opus".to_string(),
+            },
+            enabled: true,
+            rewrite: vec![],
+            model: Some("think.model".to_string()),
+        }];
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules,
+                auto_map_regex: Some("^$".to_string()), // Match nothing (disable auto-map)
+                ..config.router
+            },
+            ..config
+        });
+
+        let mut request = AnthropicRequest {
+            model: "claude-opus-4-20250514".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("hello".to_string()),
+            }],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            forward_headers: vec![],
+        };
+
+        let decision = router.route(&mut request).unwrap();
+        assert_eq!(decision.model_name, "think.model");
+    }
+
+    #[test]
+    fn test_router_rule_contains_deep() {
+        let config = create_test_config();
+        let rules = vec![RouterRule {
+            id: Some("test-contains-deep".to_string()),
+            name: Some("Deep search test".to_string()),
+            rule_type: RouterRuleType::Condition {
+                condition: crate::cli::RuleCondition {
+                    left: "request.body.messages".to_string(),
+                    operator: RuleOperator::ContainsDeep,
+                    right: "large_file".to_string(),
+                },
+            },
+            enabled: true,
+            rewrite: vec![],
+            model: Some("think.model".to_string()),
+        }];
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules,
+                ..config.router
+            },
+            ..config
+        });
+
+        let mut request = AnthropicRequest {
+            model: "default.model".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("Please read the large_file content".to_string()),
+            }],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            forward_headers: vec![],
+        };
+
+        let decision = router.route(&mut request).unwrap();
+        assert_eq!(decision.model_name, "think.model");
+    }
+
+    #[test]
+    fn test_router_rule_disabled() {
+        let config = create_test_config();
+        let rules = vec![RouterRule {
+            id: Some("test-disabled".to_string()),
+            name: Some("Disabled rule".to_string()),
+            rule_type: RouterRuleType::ModelPrefix {
+                prefix: "claude".to_string(),
+            },
+            enabled: false, // Disabled
+            rewrite: vec![],
+            model: Some("think.model".to_string()),
+        }];
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules,
+                auto_map_regex: Some(String::new()), // Disable auto-map
+                ..config.router
+            },
+            ..config
+        });
+
+        let mut request = AnthropicRequest {
+            model: "claude-opus-4".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("hello".to_string()),
+            }],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            forward_headers: vec![],
+        };
+
+        // Disabled rule should NOT match → falls through to default
+        let decision = router.route(&mut request).unwrap();
+        assert_eq!(decision.model_name, "default.model");
+    }
+
+    #[test]
+    fn test_router_rule_no_match_falls_through() {
+        let config = create_test_config();
+        let rules = vec![RouterRule {
+            id: Some("test-no-match".to_string()),
+            name: Some("No match test".to_string()),
+            rule_type: RouterRuleType::Condition {
+                condition: crate::cli::RuleCondition {
+                    left: "request.body.model".to_string(),
+                    operator: RuleOperator::Eq,
+                    right: "nonexistent-model".to_string(),
+                },
+            },
+            enabled: true,
+            rewrite: vec![],
+            model: Some("think.model".to_string()),
+        }];
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules,
+                ..config.router
+            },
+            ..config
+        });
+
+        let mut request = AnthropicRequest {
+            model: "claude-sonnet-4".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("hello".to_string()),
+            }],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            forward_headers: vec![],
+        };
+
+        // Rule doesn't match → falls through to default
+        let decision = router.route(&mut request).unwrap();
+        assert_eq!(decision.model_name, "default.model");
     }
 }

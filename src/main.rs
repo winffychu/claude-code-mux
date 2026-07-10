@@ -5,6 +5,7 @@ use tracing_subscriber::EnvFilter;
 
 mod auth;
 mod cli;
+mod headers;
 mod message_tracing;
 mod models;
 mod pid;

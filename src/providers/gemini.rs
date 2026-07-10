@@ -474,6 +474,7 @@ impl AnthropicProvider for GeminiProvider {
             let bearer_token = bearer_token.clone();
             let code_assist_request = code_assist_request.clone();
             let url = url.clone();
+            let forward_headers = request.forward_headers.clone();
 
             // Use retry handler for 429 errors
             let response = self.handle_rate_limit_retry(
@@ -487,6 +488,13 @@ impl AnthropicProvider for GeminiProvider {
                     for (key, value) in &custom_headers {
                         req_builder = req_builder.header(key, value);
                     }
+
+                    // Merge forwarded client headers
+                    let req_builder = crate::headers::merge_forward_headers(
+                        req_builder,
+                        &forward_headers,
+                        &["content-type", "authorization"],
+                    );
 
                     // Send request
                     req_builder.json(&code_assist_request).send()
@@ -562,6 +570,7 @@ impl AnthropicProvider for GeminiProvider {
             let custom_headers = self.custom_headers.clone();
             let gemini_request = gemini_request.clone();
             let url = url.clone();
+            let forward_headers = request.forward_headers.clone();
 
             // Use retry handler for 429 errors
             let response = self.handle_rate_limit_retry(
@@ -572,6 +581,13 @@ impl AnthropicProvider for GeminiProvider {
                     for (key, value) in &custom_headers {
                         req_builder = req_builder.header(key, value);
                     }
+
+                    // Merge forwarded client headers
+                    let req_builder = crate::headers::merge_forward_headers(
+                        req_builder,
+                        &forward_headers,
+                        &["content-type"],
+                    );
 
                     // Send request
                     req_builder.json(&gemini_request).send()
@@ -663,6 +679,13 @@ impl AnthropicProvider for GeminiProvider {
                 req_builder = req_builder.header(key, value);
             }
 
+            // Merge forwarded client headers
+            let req_builder = crate::headers::merge_forward_headers(
+                req_builder,
+                &request.forward_headers,
+                &["content-type", "authorization"],
+            );
+
             // Send request
             let response = req_builder.json(&code_assist_request).send().await?;
 
@@ -723,6 +746,13 @@ impl AnthropicProvider for GeminiProvider {
             for (key, value) in &self.custom_headers {
                 req_builder = req_builder.header(key, value);
             }
+
+            // Merge forwarded client headers
+            let req_builder = crate::headers::merge_forward_headers(
+                req_builder,
+                &request.forward_headers,
+                &["content-type"],
+            );
 
             // Send request
             let response = req_builder.json(&gemini_request).send().await?;

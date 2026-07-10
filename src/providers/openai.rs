@@ -1279,6 +1279,13 @@ impl AnthropicProvider for OpenAIProvider {
                 req_builder = req_builder.header(key, value);
             }
 
+            // Merge forwarded client headers
+            let req_builder = crate::headers::merge_forward_headers(
+                req_builder,
+                &request.forward_headers,
+                &["authorization", "content-type", "user-agent", "origin", "referer", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "openai-beta", "chatgpt-account-id", "originator"],
+            );
+
             let response = req_builder
                 .json(&responses_request)
                 .send()
@@ -1351,6 +1358,13 @@ impl AnthropicProvider for OpenAIProvider {
             for (key, value) in &self.custom_headers {
                 req_builder = req_builder.header(key, value);
             }
+
+            // Merge forwarded client headers
+            let req_builder = crate::headers::merge_forward_headers(
+                req_builder,
+                &request.forward_headers,
+                &["authorization", "content-type", "user-agent", "origin", "referer", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "chatgpt-account-id"],
+            );
 
             let response = req_builder
                 .json(&openai_request)
@@ -1492,6 +1506,13 @@ impl AnthropicProvider for OpenAIProvider {
         for (key, value) in &self.custom_headers {
             req_builder = req_builder.header(key, value);
         }
+
+        // Merge forwarded client headers
+        let req_builder = crate::headers::merge_forward_headers(
+            req_builder,
+            &request.forward_headers,
+            &["authorization", "content-type", "accept", "user-agent", "origin", "referer", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "openai-beta", "chatgpt-account-id", "originator"],
+        );
 
         let response = req_builder
             .json(&request_body)

@@ -357,6 +357,13 @@ impl AnthropicCompatibleProvider {
             req_builder = req_builder.header(key, value);
         }
 
+        // Merge forwarded client headers (existing_keys protects auth/content-type/anthropic-* headers)
+        let req_builder = crate::headers::merge_forward_headers(
+            req_builder,
+            &request.forward_headers,
+            &["anthropic-version", "content-type", "x-api-key", "authorization", "anthropic-beta"],
+        );
+
         let response = req_builder.json(request).send().await?;
 
         if !response.status().is_success() {
@@ -404,6 +411,13 @@ impl AnthropicCompatibleProvider {
         for (key, value) in &self.custom_headers {
             req_builder = req_builder.header(key, value);
         }
+
+        // Merge forwarded client headers
+        let req_builder = crate::headers::merge_forward_headers(
+            req_builder,
+            &request.forward_headers,
+            &["anthropic-version", "content-type", "x-api-key", "authorization", "anthropic-beta"],
+        );
 
         let response = req_builder.json(request).send().await?;
 
@@ -478,6 +492,13 @@ impl AnthropicProvider for AnthropicCompatibleProvider {
             } else {
                 req_builder = req_builder.header("x-api-key", auth_value);
             }
+
+            // Merge forwarded client headers
+            let req_builder = crate::headers::merge_forward_headers(
+                req_builder,
+                &request.forward_headers,
+                &["anthropic-version", "content-type", "x-api-key", "authorization", "anthropic-beta"],
+            );
 
             let response = req_builder
                 .json(&request)
