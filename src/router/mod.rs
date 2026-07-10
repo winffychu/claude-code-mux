@@ -36,6 +36,31 @@ pub struct Router {
     rules: Vec<RouterRule>,
 }
 
+/// Extract text from MessageContent for token counting
+fn message_text(content: &MessageContent) -> String {
+    match content {
+        MessageContent::Text(t) => t.clone(),
+        MessageContent::Blocks(blocks) => blocks
+            .iter()
+            .filter_map(|b| b.as_text().map(|s| s.to_string()))
+            .collect::<Vec<_>>()
+            .join(" "),
+    }
+}
+
+/// Character length of message content (for fallback token estimation)
+fn message_text_len(content: &MessageContent) -> usize {
+    message_text(content).len()
+}
+
+/// Iterate over text segments in a SystemPrompt
+fn system_text_iter(system: &SystemPrompt) -> Vec<String> {
+    match system {
+        SystemPrompt::Text(t) => vec![t.clone()],
+        SystemPrompt::Blocks(blocks) => blocks.iter().map(|b| b.text.clone()).collect(),
+    }
+}
+
 impl Router {
     /// Create a new router with configuration
     pub fn new(config: AppConfig) -> Self {
@@ -266,7 +291,22 @@ impl Router {
                 }
             };
 
+            // Threshold check: rule only triggers if token_count >= threshold
             if matched {
+                if let Some(threshold) = rule.threshold {
+                    if request.token_count.is_none() {
+                        request.token_count = Some(self.estimate_token_count(request));
+                    }
+                    let token_count = request.token_count.unwrap_or(0);
+                    if token_count < threshold {
+                        debug!(
+                            "📋 Router rule '{}' matched but token_count {} < threshold {}, skipping",
+                            rule.id.as_deref().unwrap_or("?"),
+                            token_count, threshold
+                        );
+                        continue;
+                    }
+                }
                 // Apply rewrites
                 for rewrite in &rule.rewrite {
                     self.apply_rewrite(rewrite, request);
@@ -346,6 +386,34 @@ impl Router {
         }
     }
 
+    /// Estimate token count for threshold routing using tiktoken cl100k_base BPE.
+    /// Lazily computed — only called when a router rule has a threshold set.
+    fn estimate_token_count(&self, request: &AnthropicRequest) -> u32 {
+        use tiktoken_rs::cl100k_base;
+        let bpe = match cl100k_base() {
+            Ok(bpe) => bpe,
+            Err(e) => {
+                debug!("Failed to load tiktoken BPE: {}, using char-based fallback", e);
+                return request.messages.iter()
+                    .map(|m| message_text_len(&m.content))
+                    .sum::<usize>() as u32 / 4;
+            }
+        };
+        let mut total: usize = 0;
+        // System prompt tokens
+        if let Some(ref system) = request.system {
+            for t in system_text_iter(system) {
+                total += bpe.encode_with_special_tokens(&t).len();
+            }
+        }
+        // Message tokens
+        for msg in &request.messages {
+            total += bpe.encode_with_special_tokens(&msg.role).len();
+            total += bpe.encode_with_special_tokens(&message_text(&msg.content)).len();
+        }
+        total as u32
+    }
+
     /// Resolve a path like "request.body.model" or "request.body.messages.0.content" to a Value.
     /// Supports: request.body.* (serialized AnthropicRequest fields), request.model (shortcut)
     fn resolve_path_value(&self, path: &str, request: &AnthropicRequest) -> Option<Value> {
@@ -416,7 +484,7 @@ impl Router {
     fn apply_rewrite(&self, rewrite: &RouterRuleRewrite, request: &mut AnthropicRequest) {
         let path = rewrite.key.strip_prefix("request.").unwrap_or(&rewrite.key);
 
-        // Only support rewriting request.body.model (the main use case)
+        // Handle request.body.model (the main use case)
         if path == "body.model" || path == "model" {
             match rewrite.operation {
                 RewriteOperation::Set => {
@@ -436,7 +504,34 @@ impl Router {
             return;
         }
 
-        // Other rewrite targets not yet implemented
+        // Handle request.header.<name> — set or delete a forwarded header
+        if let Some(header_name) = path.strip_prefix("header.") {
+            match rewrite.operation {
+                RewriteOperation::Set => {
+                    if let Some(ref value) = rewrite.value {
+                        let key = header_name.to_lowercase();
+                        // Remove existing entry if present (to update position)
+                        request.forward_headers.retain(|(k, _)| k != &key);
+                        request.forward_headers.push((key, value.clone()));
+                        debug!("📋 Rewrite: header '{}' set to '{}'", header_name, value);
+                    }
+                }
+                RewriteOperation::Delete => {
+                    let key = header_name.to_lowercase();
+                    let before = request.forward_headers.len();
+                    request.forward_headers.retain(|(k, _)| k != &key);
+                    if request.forward_headers.len() < before {
+                        debug!("📋 Rewrite: header '{}' deleted", header_name);
+                    }
+                }
+                _ => {
+                    debug!("📋 Rewrite operation {:?} not supported for header '{}'", rewrite.operation, header_name);
+                }
+            }
+            return;
+        }
+
+        // Other rewrite targets not yet implemented (body.* paths, array operations)
         debug!("📋 Rewrite to path '{}' not yet implemented (operation: {:?})", path, rewrite.operation);
     }
 
@@ -875,6 +970,7 @@ mod tests {
             system: None,
             tools: None,
             forward_headers: vec![],
+            token_count: None,
         }
     }
 
@@ -1239,6 +1335,7 @@ mod tests {
             system: None,
             tools: None,
             forward_headers: vec![],
+            token_count: None,
         };
 
         let decision = router.route(&mut request).unwrap();
@@ -1294,6 +1391,7 @@ mod tests {
             system: None,
             tools: None,
             forward_headers: vec![],
+            token_count: None,
         };
 
         let decision = router.route(&mut request).unwrap();
@@ -1360,6 +1458,7 @@ mod tests {
             system: None,
             tools: None,
             forward_headers: vec![],
+            token_count: None,
         };
 
         let decision = router.route(&mut request).unwrap();
@@ -1391,6 +1490,7 @@ mod tests {
             enabled: true,
             rewrite: vec![],
             model: Some("claude-sonnet-4".to_string()),
+            threshold: None,
         }];
         let router = Router::new(AppConfig {
             router: RouterConfig {
@@ -1417,6 +1517,7 @@ mod tests {
             system: None,
             tools: None,
             forward_headers: vec![],
+            token_count: None,
         };
 
         let decision = router.route(&mut request).unwrap();
@@ -1436,6 +1537,7 @@ mod tests {
             enabled: true,
             rewrite: vec![],
             model: Some("think.model".to_string()),
+            threshold: None,
         }];
         let router = Router::new(AppConfig {
             router: RouterConfig {
@@ -1463,6 +1565,7 @@ mod tests {
             system: None,
             tools: None,
             forward_headers: vec![],
+            token_count: None,
         };
 
         let decision = router.route(&mut request).unwrap();
@@ -1485,6 +1588,7 @@ mod tests {
             enabled: true,
             rewrite: vec![],
             model: Some("think.model".to_string()),
+            threshold: None,
         }];
         let router = Router::new(AppConfig {
             router: RouterConfig {
@@ -1511,6 +1615,7 @@ mod tests {
             system: None,
             tools: None,
             forward_headers: vec![],
+            token_count: None,
         };
 
         let decision = router.route(&mut request).unwrap();
@@ -1529,6 +1634,7 @@ mod tests {
             enabled: false, // Disabled
             rewrite: vec![],
             model: Some("think.model".to_string()),
+            threshold: None,
         }];
         let router = Router::new(AppConfig {
             router: RouterConfig {
@@ -1556,6 +1662,7 @@ mod tests {
             system: None,
             tools: None,
             forward_headers: vec![],
+            token_count: None,
         };
 
         // Disabled rule should NOT match → falls through to default
@@ -1579,6 +1686,7 @@ mod tests {
             enabled: true,
             rewrite: vec![],
             model: Some("think.model".to_string()),
+            threshold: None,
         }];
         let router = Router::new(AppConfig {
             router: RouterConfig {
@@ -1605,6 +1713,7 @@ mod tests {
             system: None,
             tools: None,
             forward_headers: vec![],
+            token_count: None,
         };
 
         // Rule doesn't match → falls through to default
@@ -1632,6 +1741,7 @@ mod tests {
             enabled: true,
             rewrite: vec![],
             model: Some("claude-haiku-4-5".to_string()),
+            threshold: None,
         }];
         let router = Router::new(AppConfig {
             router: RouterConfig {
@@ -1659,6 +1769,7 @@ mod tests {
             system: None,
             tools: None,
             forward_headers: vec![],
+            token_count: None,
         };
 
         let decision = router.route(&mut request).unwrap();
@@ -1678,6 +1789,7 @@ mod tests {
             enabled: true,
             rewrite: vec![],
             model: Some("deepseek-v4-pro".to_string()),
+            threshold: None,
         }];
         let router = Router::new(AppConfig {
             router: RouterConfig {
@@ -1705,6 +1817,7 @@ mod tests {
             system: None,
             tools: None,
             forward_headers: vec![],
+            token_count: None,
         };
 
         let decision = router.route(&mut request).unwrap();
@@ -1729,6 +1842,7 @@ mod tests {
                 r#match: None,
             }],
             model: None, // No model override, rely on rewrite
+            threshold: None,
         }];
         let router = Router::new(AppConfig {
             router: RouterConfig {
@@ -1756,6 +1870,7 @@ mod tests {
             system: None,
             tools: None,
             forward_headers: vec![],
+            token_count: None,
         };
 
         let decision = router.route(&mut request).unwrap();
@@ -1782,6 +1897,7 @@ mod tests {
             enabled: true,
             rewrite: vec![],
             model: Some("deepseek-v4-pro".to_string()),
+            threshold: None,
         }];
         let router = Router::new(AppConfig {
             router: RouterConfig {
@@ -1809,6 +1925,7 @@ mod tests {
             system: None,
             tools: None,
             forward_headers: vec![],
+            token_count: None,
         };
 
         let decision = router.route(&mut request).unwrap();
@@ -1832,6 +1949,7 @@ mod tests {
             enabled: true,
             rewrite: vec![],
             model: Some("claude-haiku-4-5".to_string()),
+            threshold: None,
         }];
         let router = Router::new(AppConfig {
             router: RouterConfig {
@@ -1859,11 +1977,1010 @@ mod tests {
             system: None,
             tools: None,
             forward_headers: vec![],
+            token_count: None,
         };
 
         // Rule expects claude-opus-4-5, request has deepseek-v4-flash → no match
         // auto_map disabled (^$), so model stays as original deepseek-v4-flash
         let decision = router.route(&mut request).unwrap();
         assert_eq!(decision.model_name, "deepseek-v4-flash");
+    }
+
+    // ===== P0: Operator coverage tests =====
+
+    fn make_condition_rule(
+        operator: RuleOperator,
+        left: &str,
+        right: &str,
+        target_model: &str,
+    ) -> RouterRule {
+        RouterRule {
+            id: Some("op-test".to_string()),
+            name: Some("Operator test".to_string()),
+            rule_type: RouterRuleType::Condition {
+                condition: crate::cli::RuleCondition {
+                    left: left.to_string(),
+                    operator,
+                    right: right.to_string(),
+                },
+            },
+            enabled: true,
+            rewrite: vec![],
+            model: Some(target_model.to_string()),
+            threshold: None,
+        }
+    }
+
+    fn make_request_with_model(model: &str) -> AnthropicRequest {
+        AnthropicRequest {
+            model: model.to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("hello".to_string()),
+            }],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            forward_headers: vec![],
+            token_count: None,
+        }
+    }
+
+    fn route_with_rule(rule: RouterRule, request: &mut AnthropicRequest) -> String {
+        let config = create_test_config();
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules: vec![rule],
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+        router.route(request).unwrap().model_name
+    }
+
+    #[test]
+    fn test_operator_ne_match() {
+        // model != "gpt-4" → "claude-opus-4" should match and route to target
+        let rule = make_condition_rule(RuleOperator::Ne, "request.body.model", "gpt-4", "think.model");
+        let mut request = make_request_with_model("claude-opus-4");
+        assert_eq!(route_with_rule(rule, &mut request), "think.model");
+    }
+
+    #[test]
+    fn test_operator_ne_no_match() {
+        // model != "claude-opus-4" but model IS "claude-opus-4" → false → no rule match
+        // auto_map disabled (^$), so model stays original → default fallback returns original
+        let rule = make_condition_rule(RuleOperator::Ne, "request.body.model", "claude-opus-4", "think.model");
+        let mut request = make_request_with_model("claude-opus-4");
+        let config = create_test_config();
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules: vec![rule],
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+        let decision = router.route(&mut request).unwrap();
+        // With auto_map disabled (^$), model is not auto-mapped to default.model,
+        // so the default fallback returns the original model name unchanged.
+        assert_eq!(decision.model_name, "claude-opus-4");
+    }
+
+    #[test]
+    fn test_operator_gt_match() {
+        // "100" > "50" → match
+        let rule = make_condition_rule(RuleOperator::Gt, "request.body.model", "50", "think.model");
+        let mut request = make_request_with_model("100");
+        assert_eq!(route_with_rule(rule, &mut request), "think.model");
+    }
+
+    #[test]
+    fn test_operator_gt_no_match() {
+        // "10" > "50" → false → default
+        let rule = make_condition_rule(RuleOperator::Gt, "request.body.model", "50", "think.model");
+        let mut request = make_request_with_model("10");
+        let config = create_test_config();
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules: vec![rule],
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+        let decision = router.route(&mut request).unwrap();
+        // With auto_map disabled (^$), "10" is not auto-mapped, so default fallback
+        // returns the original model name "10", not "default.model".
+        assert_eq!(decision.model_name, "10");
+    }
+
+    #[test]
+    fn test_operator_ge_match_equal() {
+        // "50" >= "50" → true (boundary: equal case)
+        let rule = make_condition_rule(RuleOperator::Ge, "request.body.model", "50", "think.model");
+        let mut request = make_request_with_model("50");
+        assert_eq!(route_with_rule(rule, &mut request), "think.model");
+    }
+
+    #[test]
+    fn test_operator_ge_match_greater() {
+        // "51" >= "50" → true
+        let rule = make_condition_rule(RuleOperator::Ge, "request.body.model", "50", "think.model");
+        let mut request = make_request_with_model("51");
+        assert_eq!(route_with_rule(rule, &mut request), "think.model");
+    }
+
+    #[test]
+    fn test_operator_ge_no_match() {
+        // "49" >= "50" → false → no rule match
+        let rule = make_condition_rule(RuleOperator::Ge, "request.body.model", "50", "think.model");
+        let mut request = make_request_with_model("49");
+        let config = create_test_config();
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules: vec![rule],
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+        let decision = router.route(&mut request).unwrap();
+        // auto_map disabled, "49" not mapped → returns original "49"
+        assert_eq!(decision.model_name, "49");
+    }
+
+    #[test]
+    fn test_operator_gt_equal_boundary() {
+        // "50" > "50" → false (strict greater, equal should NOT match)
+        let rule = make_condition_rule(RuleOperator::Gt, "request.body.model", "50", "think.model");
+        let mut request = make_request_with_model("50");
+        let config = create_test_config();
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules: vec![rule],
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+        let decision = router.route(&mut request).unwrap();
+        // Gt is strict: 50 > 50 is false → no match → returns original "50"
+        assert_eq!(decision.model_name, "50");
+    }
+
+    #[test]
+    fn test_operator_lt_match() {
+        // "10" < "50" → true
+        let rule = make_condition_rule(RuleOperator::Lt, "request.body.model", "50", "think.model");
+        let mut request = make_request_with_model("10");
+        assert_eq!(route_with_rule(rule, &mut request), "think.model");
+    }
+
+    #[test]
+    fn test_operator_lt_no_match() {
+        // "100" < "50" → false → default
+        let rule = make_condition_rule(RuleOperator::Lt, "request.body.model", "50", "think.model");
+        let mut request = make_request_with_model("100");
+        let config = create_test_config();
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules: vec![rule],
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+        let decision = router.route(&mut request).unwrap();
+        // auto_map disabled (^$), "100" not auto-mapped → returns original "100"
+        assert_eq!(decision.model_name, "100");
+    }
+
+    #[test]
+    fn test_operator_le_match_equal() {
+        // "50" <= "50" → true (boundary: equal case)
+        let rule = make_condition_rule(RuleOperator::Le, "request.body.model", "50", "think.model");
+        let mut request = make_request_with_model("50");
+        assert_eq!(route_with_rule(rule, &mut request), "think.model");
+    }
+
+    #[test]
+    fn test_operator_le_match_less() {
+        // "49" <= "50" → true
+        let rule = make_condition_rule(RuleOperator::Le, "request.body.model", "50", "think.model");
+        let mut request = make_request_with_model("49");
+        assert_eq!(route_with_rule(rule, &mut request), "think.model");
+    }
+
+    #[test]
+    fn test_operator_le_no_match() {
+        // "51" <= "50" → false → no rule match
+        let rule = make_condition_rule(RuleOperator::Le, "request.body.model", "50", "think.model");
+        let mut request = make_request_with_model("51");
+        let config = create_test_config();
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules: vec![rule],
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+        let decision = router.route(&mut request).unwrap();
+        // auto_map disabled, "51" not mapped → returns original "51"
+        assert_eq!(decision.model_name, "51");
+    }
+
+    #[test]
+    fn test_operator_lt_equal_boundary() {
+        // "50" < "50" → false (strict less, equal should NOT match)
+        let rule = make_condition_rule(RuleOperator::Lt, "request.body.model", "50", "think.model");
+        let mut request = make_request_with_model("50");
+        let config = create_test_config();
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules: vec![rule],
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+        let decision = router.route(&mut request).unwrap();
+        // Lt is strict: 50 < 50 is false → no match → returns original "50"
+        assert_eq!(decision.model_name, "50");
+    }
+
+    #[test]
+    fn test_operator_numeric_parse_failure_left() {
+        // left = "abc" can't parse to f64 → condition returns false → default
+        let rule = make_condition_rule(RuleOperator::Gt, "request.body.model", "50", "think.model");
+        let mut request = make_request_with_model("abc");
+        let config = create_test_config();
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules: vec![rule],
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+        let decision = router.route(&mut request).unwrap();
+        // auto_map disabled (^$), "abc" not auto-mapped → returns original "abc"
+        assert_eq!(decision.model_name, "abc");
+    }
+
+    #[test]
+    fn test_operator_numeric_parse_failure_right() {
+        // right = "xyz" can't parse to f64 → condition returns false → default
+        let rule = make_condition_rule(RuleOperator::Lt, "request.body.model", "xyz", "think.model");
+        let mut request = make_request_with_model("10");
+        let config = create_test_config();
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules: vec![rule],
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+        let decision = router.route(&mut request).unwrap();
+        // auto_map disabled (^$), "10" not auto-mapped → returns original "10"
+        assert_eq!(decision.model_name, "10");
+    }
+
+    #[test]
+    fn test_operator_numeric_decimal_values() {
+        // 3.14 > 3.0 → true (float comparison)
+        let rule = make_condition_rule(RuleOperator::Gt, "request.body.model", "3.0", "think.model");
+        let mut request = make_request_with_model("3.14");
+        assert_eq!(route_with_rule(rule, &mut request), "think.model");
+    }
+
+    #[test]
+    fn test_operator_numeric_negative_values() {
+        // -5 < -1 → true
+        let rule = make_condition_rule(RuleOperator::Lt, "request.body.model", "-1", "think.model");
+        let mut request = make_request_with_model("-5");
+        assert_eq!(route_with_rule(rule, &mut request), "think.model");
+    }
+
+    #[test]
+    fn test_operator_contains_match() {
+        // model contains "sonnet" → match
+        let rule = make_condition_rule(RuleOperator::Contains, "request.body.model", "sonnet", "think.model");
+        let mut request = make_request_with_model("claude-sonnet-4");
+        assert_eq!(route_with_rule(rule, &mut request), "think.model");
+    }
+
+    #[test]
+    fn test_operator_contains_no_match() {
+        // model contains "sonnet" but model is "gpt-4" → false → default
+        let rule = make_condition_rule(RuleOperator::Contains, "request.body.model", "sonnet", "think.model");
+        let mut request = make_request_with_model("gpt-4");
+        let config = create_test_config();
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules: vec![rule],
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+        let decision = router.route(&mut request).unwrap();
+        // auto_map disabled (^$), "gpt-4" not auto-mapped → returns original "gpt-4"
+        assert_eq!(decision.model_name, "gpt-4");
+    }
+
+    #[test]
+    fn test_operator_not_contains_match() {
+        // model NOT contains "sonnet" → "gpt-4" doesn't contain "sonnet" → true
+        let rule = make_condition_rule(RuleOperator::NotContains, "request.body.model", "sonnet", "think.model");
+        let mut request = make_request_with_model("gpt-4");
+        assert_eq!(route_with_rule(rule, &mut request), "think.model");
+    }
+
+    #[test]
+    fn test_operator_not_contains_no_match() {
+        // model NOT contains "sonnet" but model IS "claude-sonnet-4" → false → default
+        let rule = make_condition_rule(RuleOperator::NotContains, "request.body.model", "sonnet", "think.model");
+        let mut request = make_request_with_model("claude-sonnet-4");
+        let config = create_test_config();
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules: vec![rule],
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+        let decision = router.route(&mut request).unwrap();
+        // auto_map disabled (^$), "claude-sonnet-4" not auto-mapped → returns original
+        assert_eq!(decision.model_name, "claude-sonnet-4");
+    }
+
+    #[test]
+    fn test_operator_starts_with_match() {
+        // model starts with "claude" → "claude-opus-4" matches → think.model
+        let rule = make_condition_rule(RuleOperator::StartsWith, "request.body.model", "claude", "think.model");
+        let mut request = make_request_with_model("claude-opus-4");
+        assert_eq!(route_with_rule(rule, &mut request), "think.model");
+    }
+
+    #[test]
+    fn test_operator_starts_with_no_match() {
+        // model starts with "claude" but model is "gpt-4" → false → default
+        let rule = make_condition_rule(RuleOperator::StartsWith, "request.body.model", "claude", "think.model");
+        let mut request = make_request_with_model("gpt-4");
+        let config = create_test_config();
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules: vec![rule],
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+        let decision = router.route(&mut request).unwrap();
+        // auto_map disabled (^$), "gpt-4" not auto-mapped → returns original "gpt-4"
+        assert_eq!(decision.model_name, "gpt-4");
+    }
+
+    // ===== P1: Rewrite Delete operation =====
+
+    #[test]
+    fn test_rewrite_delete_resets_to_default() {
+        let config = create_test_config();
+        let rules = vec![RouterRule {
+            id: Some("delete-test".to_string()),
+            name: Some("Delete rewrite test".to_string()),
+            rule_type: RouterRuleType::ModelPrefix {
+                prefix: "deepseek".to_string(),
+            },
+            enabled: true,
+            rewrite: vec![RouterRuleRewrite {
+                key: "request.body.model".to_string(),
+                operation: RewriteOperation::Delete,
+                value: None,
+                r#match: None,
+            }],
+            model: None,
+            threshold: None,
+        }];
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules,
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+
+        let mut request = make_request_with_model("deepseek-v4-flash");
+        let decision = router.route(&mut request).unwrap();
+        // Delete resets model to default.model
+        assert_eq!(decision.model_name, "default.model");
+        assert_eq!(request.model, "default.model");
+    }
+
+    #[test]
+    fn test_rewrite_header_set() {
+        // Simulate: set a custom header via rewrite
+        let config = create_test_config();
+        let rules = vec![RouterRule {
+            id: Some("header-set-test".to_string()),
+            name: Some("Set custom header".to_string()),
+            rule_type: RouterRuleType::ModelPrefix {
+                prefix: "deepseek".to_string(),
+            },
+            enabled: true,
+            rewrite: vec![RouterRuleRewrite {
+                key: "request.header.x-target-provider".to_string(),
+                operation: RewriteOperation::Set,
+                value: Some("openai".to_string()),
+                r#match: None,
+            }],
+            model: None,
+            threshold: None,
+        }];
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules,
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+
+        let mut request = make_request_with_model("deepseek-v4-flash");
+        let _decision = router.route(&mut request).unwrap();
+        // Verify header was set in forward_headers
+        assert!(request.forward_headers.iter().any(|(k, v)| k == "x-target-provider" && v == "openai"));
+    }
+
+    #[test]
+    fn test_rewrite_header_delete() {
+        // Simulate: delete a header from forward_headers
+        let config = create_test_config();
+        let rules = vec![RouterRule {
+            id: Some("header-del-test".to_string()),
+            name: Some("Delete header".to_string()),
+            rule_type: RouterRuleType::ModelPrefix {
+                prefix: "deepseek".to_string(),
+            },
+            enabled: true,
+            rewrite: vec![RouterRuleRewrite {
+                key: "request.header.x-api-key".to_string(),
+                operation: RewriteOperation::Delete,
+                value: None,
+                r#match: None,
+            }],
+            model: None,
+            threshold: None,
+        }];
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules,
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+
+        let mut request = make_request_with_model("deepseek-v4-flash");
+        // Add a test header that should be deleted
+        request.forward_headers.push(("x-api-key".to_string(), "test-value".to_string()));
+        let _decision = router.route(&mut request).unwrap();
+        // Verify header was removed
+        assert!(!request.forward_headers.iter().any(|(k, _)| k == "x-api-key"));
+    }
+
+    // ===== P1: extract_subagent_model =====
+
+    #[test]
+    fn test_subagent_model_extraction_with_config() {
+        use crate::cli::{ModelConfig, ModelMapping};
+        use crate::models::{SystemBlock, SystemPrompt};
+
+        let config = create_test_config();
+        let config = AppConfig {
+            models: vec![ModelConfig {
+                name: "custom-agent-model".to_string(),
+                mappings: vec![ModelMapping {
+                    priority: 1,
+                    provider: "test-provider".to_string(),
+                    actual_model: "provider-actual-model".to_string(),
+                    inject_continuation_prompt: false,
+                }],
+            }],
+            ..config
+        };
+        let router = Router::new(config);
+
+        let mut request = AnthropicRequest {
+            model: "claude-opus-4".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("hello".to_string()),
+            }],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: Some(SystemPrompt::Blocks(vec![
+                SystemBlock {
+                    r#type: "text".to_string(),
+                    text: "System prompt block 1".to_string(),
+                    cache_control: None,
+                },
+                SystemBlock {
+                    r#type: "text".to_string(),
+                    text: "Context here <CCM-SUBAGENT-MODEL>custom-agent-model</CCM-SUBAGENT-MODEL> end".to_string(),
+                    cache_control: None,
+                },
+            ])),
+            tools: None,
+            forward_headers: vec![],
+            token_count: None,
+        };
+
+        let decision = router.route(&mut request).unwrap();
+        // Should route to the configured model name
+        assert_eq!(decision.model_name, "custom-agent-model");
+
+        // Verify the tag was removed from the system prompt
+        if let Some(SystemPrompt::Blocks(blocks)) = &request.system {
+            assert!(!blocks[1].text.contains("<CCM-SUBAGENT-MODEL>"));
+        } else {
+            panic!("Expected SystemPrompt::Blocks");
+        }
+    }
+
+    #[test]
+    fn test_subagent_model_extraction_fallback_deprecated() {
+        // Tag value not in models config → falls back to direct provider model name
+        use crate::models::{SystemBlock, SystemPrompt};
+
+        let config = create_test_config();
+        let router = Router::new(config);
+
+        let mut request = AnthropicRequest {
+            model: "claude-opus-4".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("hello".to_string()),
+            }],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: Some(SystemPrompt::Blocks(vec![
+                SystemBlock {
+                    r#type: "text".to_string(),
+                    text: "Block 1".to_string(),
+                    cache_control: None,
+                },
+                SystemBlock {
+                    r#type: "text".to_string(),
+                    text: "<CCM-SUBAGENT-MODEL>unregistered-model</CCM-SUBAGENT-MODEL>".to_string(),
+                    cache_control: None,
+                },
+            ])),
+            tools: None,
+            forward_headers: vec![],
+            token_count: None,
+        };
+
+        let decision = router.route(&mut request).unwrap();
+        // Falls back to direct provider model name (deprecated behavior)
+        assert_eq!(decision.model_name, "unregistered-model");
+    }
+
+    #[test]
+    fn test_subagent_model_no_system_prompt() {
+        let config = create_test_config();
+        let router = Router::new(config);
+
+        let mut request = make_request_with_model("claude-opus-4");
+        // system is None → no subagent model extraction
+        let decision = router.route(&mut request).unwrap();
+        assert_eq!(decision.model_name, "default.model");
+    }
+
+    #[test]
+    fn test_subagent_model_text_system_prompt() {
+        // System prompt as Text (not Blocks) → no subagent extraction
+        use crate::models::SystemPrompt;
+
+        let config = create_test_config();
+        let router = Router::new(config);
+
+        let mut request = AnthropicRequest {
+            model: "claude-opus-4".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("hello".to_string()),
+            }],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: Some(SystemPrompt::Text("Just text".to_string())),
+            tools: None,
+            forward_headers: vec![],
+            token_count: None,
+        };
+
+        let decision = router.route(&mut request).unwrap();
+        // Text system prompt → no extraction → default
+        assert_eq!(decision.model_name, "default.model");
+    }
+
+    #[test]
+    fn test_subagent_model_single_block() {
+        // Only 1 block → needs at least 2 → no extraction
+        use crate::models::{SystemBlock, SystemPrompt};
+
+        let config = create_test_config();
+        let router = Router::new(config);
+
+        let mut request = AnthropicRequest {
+            model: "claude-opus-4".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("hello".to_string()),
+            }],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: Some(SystemPrompt::Blocks(vec![
+                SystemBlock {
+                    r#type: "text".to_string(),
+                    text: "<CCM-SUBAGENT-MODEL>some-model</CCM-SUBAGENT-MODEL>".to_string(),
+                    cache_control: None,
+                },
+            ])),
+            tools: None,
+            forward_headers: vec![],
+            token_count: None,
+        };
+
+        let decision = router.route(&mut request).unwrap();
+        // Only 1 block (needs >= 2) → no extraction → auto-map to default
+        assert_eq!(decision.model_name, "default.model");
+    }
+
+    #[test]
+    fn test_subagent_model_no_tag_in_second_block() {
+        // 2 blocks but second block has no tag → no extraction
+        use crate::models::{SystemBlock, SystemPrompt};
+
+        let config = create_test_config();
+        let router = Router::new(config);
+
+        let mut request = AnthropicRequest {
+            model: "claude-opus-4".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("hello".to_string()),
+            }],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: Some(SystemPrompt::Blocks(vec![
+                SystemBlock {
+                    r#type: "text".to_string(),
+                    text: "Block 1".to_string(),
+                    cache_control: None,
+                },
+                SystemBlock {
+                    r#type: "text".to_string(),
+                    text: "No tag here".to_string(),
+                    cache_control: None,
+                },
+            ])),
+            tools: None,
+            forward_headers: vec![],
+            token_count: None,
+        };
+
+        let decision = router.route(&mut request).unwrap();
+        assert_eq!(decision.model_name, "default.model");
+    }
+
+    #[test]
+    fn test_subagent_model_case_insensitive_config_lookup() {
+        // Tag value "Custom-Model" should match config model "custom-model" (case-insensitive)
+        use crate::cli::{ModelConfig, ModelMapping};
+        use crate::models::{SystemBlock, SystemPrompt};
+
+        let config = create_test_config();
+        let config = AppConfig {
+            models: vec![ModelConfig {
+                name: "custom-model".to_string(),
+                mappings: vec![ModelMapping {
+                    priority: 1,
+                    provider: "test".to_string(),
+                    actual_model: "actual".to_string(),
+                    inject_continuation_prompt: false,
+                }],
+            }],
+            ..config
+        };
+        let router = Router::new(config);
+
+        let mut request = AnthropicRequest {
+            model: "claude-opus-4".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("hello".to_string()),
+            }],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: Some(SystemPrompt::Blocks(vec![
+                SystemBlock {
+                    r#type: "text".to_string(),
+                    text: "Block 1".to_string(),
+                    cache_control: None,
+                },
+                SystemBlock {
+                    r#type: "text".to_string(),
+                    text: "<CCM-SUBAGENT-MODEL>Custom-Model</CCM-SUBAGENT-MODEL>".to_string(),
+                    cache_control: None,
+                },
+            ])),
+            tools: None,
+            forward_headers: vec![],
+            token_count: None,
+        };
+
+        let decision = router.route(&mut request).unwrap();
+        // Should resolve to the configured model name (lowercase)
+        assert_eq!(decision.model_name, "custom-model");
+    }
+
+    // ===== P1: Multi-rule priority =====
+
+    #[test]
+    fn test_multiple_rules_first_match_wins() {
+        let config = create_test_config();
+        let rules = vec![
+            RouterRule {
+                id: Some("rule-1".to_string()),
+                name: Some("First rule".to_string()),
+                rule_type: RouterRuleType::ModelPrefix {
+                    prefix: "claude".to_string(),
+                },
+                enabled: true,
+                rewrite: vec![],
+                model: Some("first-model".to_string()),
+                threshold: None,
+            },
+            RouterRule {
+                id: Some("rule-2".to_string()),
+                name: Some("Second rule".to_string()),
+                rule_type: RouterRuleType::ModelPrefix {
+                    prefix: "claude".to_string(),
+                },
+                enabled: true,
+                rewrite: vec![],
+                model: Some("second-model".to_string()),
+                threshold: None,
+            },
+        ];
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules,
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+
+        let mut request = make_request_with_model("claude-opus-4");
+        let decision = router.route(&mut request).unwrap();
+        // First matching rule wins
+        assert_eq!(decision.model_name, "first-model");
+    }
+
+    #[test]
+    fn test_multiple_rules_skip_disabled_match_second() {
+        let config = create_test_config();
+        let rules = vec![
+            RouterRule {
+                id: Some("rule-1".to_string()),
+                name: Some("First rule (disabled)".to_string()),
+                rule_type: RouterRuleType::ModelPrefix {
+                    prefix: "claude".to_string(),
+                },
+                enabled: false,
+                rewrite: vec![],
+                model: Some("first-model".to_string()),
+                threshold: None,
+            },
+            RouterRule {
+                id: Some("rule-2".to_string()),
+                name: Some("Second rule".to_string()),
+                rule_type: RouterRuleType::ModelPrefix {
+                    prefix: "claude".to_string(),
+                },
+                enabled: true,
+                rewrite: vec![],
+                model: Some("second-model".to_string()),
+                threshold: None,
+            },
+        ];
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules,
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+
+        let mut request = make_request_with_model("claude-opus-4");
+        let decision = router.route(&mut request).unwrap();
+        // First rule disabled → second rule matches
+        assert_eq!(decision.model_name, "second-model");
+    }
+
+    // ===== P0.2: Token threshold routing =====
+
+    #[test]
+    fn test_threshold_blocks_when_token_count_below() {
+        // Rule with threshold=100000, but token_count < 100000 → rule skipped, falls through
+        let config = create_test_config();
+        let rule = RouterRule {
+            id: Some("threshold-test".to_string()),
+            name: Some("threshold test".to_string()),
+            rule_type: RouterRuleType::ModelPrefix {
+                prefix: "claude".to_string(),
+            },
+            enabled: true,
+            rewrite: vec![],
+            model: Some("big-model".to_string()),
+            threshold: Some(100000),
+        };
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules: vec![rule],
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+        let mut request = make_request_with_model("claude-opus-4");
+        request.token_count = Some(50); // Far below threshold
+        let decision = router.route(&mut request).unwrap();
+        // Rule matches prefix "claude" but token_count=50 < 100000 → skip → default
+        assert_eq!(decision.model_name, "claude-opus-4"); // auto_map disabled ^$, returns original
+    }
+
+    #[test]
+    fn test_threshold_passes_when_token_count_above() {
+        // Rule with threshold=100, token_count=200 >= 100 → triggers
+        let config = create_test_config();
+        let rule = RouterRule {
+            id: Some("threshold-test".to_string()),
+            name: Some("threshold test".to_string()),
+            rule_type: RouterRuleType::ModelPrefix {
+                prefix: "claude".to_string(),
+            },
+            enabled: true,
+            rewrite: vec![],
+            model: Some("big-model".to_string()),
+            threshold: Some(100),
+        };
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules: vec![rule],
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+        let mut request = make_request_with_model("claude-opus-4");
+        request.token_count = Some(200); // Above threshold
+        let decision = router.route(&mut request).unwrap();
+        // Rule matches prefix "claude" and token_count=200 >= 100 → triggers
+        assert_eq!(decision.model_name, "big-model");
+    }
+
+    #[test]
+    fn test_threshold_none_always_triggers() {
+        // Rule with threshold=None → always triggers (no token count check)
+        let config = create_test_config();
+        let rule = RouterRule {
+            id: Some("no-threshold".to_string()),
+            name: Some("no threshold".to_string()),
+            rule_type: RouterRuleType::ModelPrefix {
+                prefix: "claude".to_string(),
+            },
+            enabled: true,
+            rewrite: vec![],
+            model: Some("any-model".to_string()),
+            threshold: None,
+        };
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules: vec![rule],
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+        let mut request = make_request_with_model("claude-opus-4");
+        // token_count=None (not set) — rule without threshold should still match
+        let decision = router.route(&mut request).unwrap();
+        assert_eq!(decision.model_name, "any-model");
+    }
+
+    #[test]
+    fn test_threshold_lazy_computation() {
+        // When threshold is set and token_count is None, it should be lazily computed.
+        // We can't predict the exact token count, but we verify the field gets populated.
+        let config = create_test_config();
+        let rule = RouterRule {
+            id: Some("lazy".to_string()),
+            name: Some("lazy computation".to_string()),
+            rule_type: RouterRuleType::ModelPrefix {
+                prefix: "claude".to_string(),
+            },
+            enabled: true,
+            rewrite: vec![],
+            model: Some("target".to_string()),
+            threshold: Some(1), // Very low threshold — will match
+        };
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules: vec![rule],
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+        let mut request = make_request_with_model("claude-opus-4");
+        // token_count starts as None
+        assert!(request.token_count.is_none());
+        let decision = router.route(&mut request).unwrap();
+        // Rule matched, threshold check happened, token_count should be populated
+        assert!(request.token_count.is_some());
+        assert_eq!(decision.model_name, "target");
     }
 }

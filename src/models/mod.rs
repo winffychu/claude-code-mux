@@ -27,6 +27,8 @@ pub struct AnthropicRequest {
     pub tools: Option<Vec<Tool>>,
     #[serde(skip)]
     pub forward_headers: Vec<(String, String)>,
+    #[serde(skip)]
+    pub token_count: Option<u32>,
 }
 
 /// Message in the conversation

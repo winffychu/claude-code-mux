@@ -253,6 +253,9 @@ pub struct RouterRule {
     /// Convenience: set model directly (equivalent to rewrite key=request.body.model operation=set)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Token threshold: rule only triggers when request token_count >= threshold
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub threshold: Option<u32>,
 }
 
 /// Model configuration with 1:N provider mappings
