@@ -17,8 +17,9 @@ This document describes the `/v1/chat/completions` endpoint which provides limit
 
 **Not Supported:**
 - Streaming (`stream: true` returns an error)
-- Tool/function calling
 - Cache tokens in usage statistics
+
+> **Updated 2026-07-10**: Tool/function calling is now supported (non-streaming). OpenAI tool definitions are converted to Anthropic Tool format, assistant tool_calls in history are converted to ToolUse blocks, and tool role messages are converted to ToolResult blocks. Response tool_use blocks are converted back to OpenAI tool_calls with `finish_reason: "tool_calls"`.
 
 ## Request Format
 
