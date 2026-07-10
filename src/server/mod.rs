@@ -703,8 +703,7 @@ async fn handle_messages(
                 // Apply routing modifications (system prompt, messages)
                 anthropic_request.system = request_for_routing.system.clone();
                 anthropic_request.messages = request_for_routing.messages.clone();
-
-                // Inject continuation prompt if configured (skip for background tasks)
+                anthropic_request.forward_headers = request_for_routing.forward_headers.clone();
                 if mapping.inject_continuation_prompt && decision.route_type != RouteType::Background {
                     if let Some(last_msg) = anthropic_request.messages.last_mut() {
                         if should_inject_continuation(last_msg) {
@@ -863,8 +862,7 @@ async fn handle_messages(
             // Apply routing modifications (system prompt, messages)
             anthropic_request.system = request_for_routing.system.clone();
             anthropic_request.messages = request_for_routing.messages.clone();
-
-            // Call provider
+            anthropic_request.forward_headers = request_for_routing.forward_headers.clone();
             let mut provider_response = provider.send_message(anthropic_request)
                 .await
                 .map_err(|e| AppError::ProviderError(e.to_string()))?;
