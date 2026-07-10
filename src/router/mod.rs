@@ -1611,4 +1611,259 @@ mod tests {
         let decision = router.route(&mut request).unwrap();
         assert_eq!(decision.model_name, "default.model");
     }
+
+    // Integration-style tests using real model names from the production config:
+    // deepseek-v4-flash, deepseek-v4-pro, claude-haiku-4-5
+
+    #[test]
+    fn test_real_router_rule_eq_deepseek_flash() {
+        // Simulate: rule matches model == "deepseek-v4-flash" → route to "claude-haiku-4-5"
+        let config = create_test_config();
+        let rules = vec![RouterRule {
+            id: Some("deepseek-flash-rule".to_string()),
+            name: Some("Route deepseek-v4-flash to haiku".to_string()),
+            rule_type: RouterRuleType::Condition {
+                condition: crate::cli::RuleCondition {
+                    left: "request.body.model".to_string(),
+                    operator: RuleOperator::Eq,
+                    right: "deepseek-v4-flash".to_string(),
+                },
+            },
+            enabled: true,
+            rewrite: vec![],
+            model: Some("claude-haiku-4-5".to_string()),
+        }];
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules,
+                auto_map_regex: Some("^$".to_string()), // Disable auto-map for non-claude models
+                ..config.router
+            },
+            ..config
+        });
+
+        let mut request = AnthropicRequest {
+            model: "deepseek-v4-flash".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("hello".to_string()),
+            }],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            forward_headers: vec![],
+        };
+
+        let decision = router.route(&mut request).unwrap();
+        assert_eq!(decision.model_name, "claude-haiku-4-5");
+    }
+
+    #[test]
+    fn test_real_router_rule_prefix_deepseek() {
+        // Simulate: any model starting with "deepseek" → route to "deepseek-v4-pro"
+        let config = create_test_config();
+        let rules = vec![RouterRule {
+            id: Some("deepseek-prefix".to_string()),
+            name: Some("Route all deepseek models".to_string()),
+            rule_type: RouterRuleType::ModelPrefix {
+                prefix: "deepseek".to_string(),
+            },
+            enabled: true,
+            rewrite: vec![],
+            model: Some("deepseek-v4-pro".to_string()),
+        }];
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules,
+                auto_map_regex: Some("^$".to_string()), // Disable auto-map
+                ..config.router
+            },
+            ..config
+        });
+
+        let mut request = AnthropicRequest {
+            model: "deepseek-v4-flash".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("hello".to_string()),
+            }],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            forward_headers: vec![],
+        };
+
+        let decision = router.route(&mut request).unwrap();
+        assert_eq!(decision.model_name, "deepseek-v4-pro");
+    }
+
+    #[test]
+    fn test_real_router_rule_rewrite_model() {
+        // Simulate: rewrite model from deepseek-v4-flash → claude-haiku-4-5 via set operation
+        let config = create_test_config();
+        let rules = vec![RouterRule {
+            id: Some("rewrite-test".to_string()),
+            name: Some("Rewrite model name".to_string()),
+            rule_type: RouterRuleType::ModelPrefix {
+                prefix: "deepseek".to_string(),
+            },
+            enabled: true,
+            rewrite: vec![RouterRuleRewrite {
+                key: "request.body.model".to_string(),
+                operation: RewriteOperation::Set,
+                value: Some("claude-haiku-4-5".to_string()),
+                r#match: None,
+            }],
+            model: None, // No model override, rely on rewrite
+        }];
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules,
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+
+        let mut request = AnthropicRequest {
+            model: "deepseek-v4-flash".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("hello".to_string()),
+            }],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            forward_headers: vec![],
+        };
+
+        let decision = router.route(&mut request).unwrap();
+        // After rewrite, request.model should be "claude-haiku-4-5"
+        assert_eq!(request.model, "claude-haiku-4-5");
+        // Decision should use the rewritten model name (not a rule model override)
+        assert_eq!(decision.model_name, "claude-haiku-4-5");
+    }
+
+    #[test]
+    fn test_real_router_rule_contains_deep_with_deepseek() {
+        // Simulate: deep search in messages for "deepseek" keyword → route to think model
+        let config = create_test_config();
+        let rules = vec![RouterRule {
+            id: Some("keyword-route".to_string()),
+            name: Some("Route based on keyword".to_string()),
+            rule_type: RouterRuleType::Condition {
+                condition: crate::cli::RuleCondition {
+                    left: "request.body.messages".to_string(),
+                    operator: RuleOperator::ContainsDeep,
+                    right: "deepseek".to_string(),
+                },
+            },
+            enabled: true,
+            rewrite: vec![],
+            model: Some("deepseek-v4-pro".to_string()),
+        }];
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules,
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+
+        let mut request = AnthropicRequest {
+            model: "deepseek-v4-flash".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("Please use deepseek for this task".to_string()),
+            }],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            forward_headers: vec![],
+        };
+
+        let decision = router.route(&mut request).unwrap();
+        assert_eq!(decision.model_name, "deepseek-v4-pro");
+    }
+
+    #[test]
+    fn test_real_router_rule_no_match_keeps_original() {
+        // Simulate: rule doesn't match deepseek-v4-flash → falls through to default
+        let config = create_test_config();
+        let rules = vec![RouterRule {
+            id: Some("no-match-real".to_string()),
+            name: Some("No match real test".to_string()),
+            rule_type: RouterRuleType::Condition {
+                condition: crate::cli::RuleCondition {
+                    left: "request.body.model".to_string(),
+                    operator: RuleOperator::Eq,
+                    right: "claude-opus-4-5".to_string(),
+                },
+            },
+            enabled: true,
+            rewrite: vec![],
+            model: Some("claude-haiku-4-5".to_string()),
+        }];
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                rules,
+                auto_map_regex: Some("^$".to_string()), // Disable auto-map
+                ..config.router
+            },
+            ..config
+        });
+
+        let mut request = AnthropicRequest {
+            model: "deepseek-v4-flash".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("hello".to_string()),
+            }],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            forward_headers: vec![],
+        };
+
+        // Rule expects claude-opus-4-5, request has deepseek-v4-flash → no match
+        // auto_map disabled (^$), so model stays as original deepseek-v4-flash
+        let decision = router.route(&mut request).unwrap();
+        assert_eq!(decision.model_name, "deepseek-v4-flash");
+    }
 }
