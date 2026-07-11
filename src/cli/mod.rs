@@ -61,6 +61,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_long_context_threshold() -> Option<u32> {
+    Some(100_000)
+}
+
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
@@ -119,6 +123,11 @@ pub struct RouterConfig {
     pub background: Option<String>,
     pub think: Option<String>,
     pub websearch: Option<String>,
+    /// 长上下文专用模型（请求 token 超过阈值时使用）
+    pub long_context: Option<String>,
+    /// 长上下文触发阈值（token 数），默认 100000
+    #[serde(default = "default_long_context_threshold")]
+    pub long_context_threshold: Option<u32>,
     /// Regex pattern for auto-mapping models (e.g., "^claude-").
     /// If empty/null, defaults to Claude models only.
     pub auto_map_regex: Option<String>,

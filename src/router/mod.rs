@@ -177,7 +177,8 @@ impl Router {
     /// 3. Subagent - CCM-SUBAGENT-MODEL tag in system prompt
     /// 4. Prompt Rules - regex pattern matching on user prompt (after background for cost savings)
     /// 5. Think - Plan Mode / reasoning enabled
-    /// 6. Default - auto-mapped or original model name
+    /// 6. Long Context - token count exceeds threshold (long_context model)
+    /// 7. Default - auto-mapped or original model name
     pub fn route(&self, request: &mut AnthropicRequest) -> Result<RouteDecision> {
         // Save original model for background task detection
         let original_model = request.model.clone();
@@ -259,6 +260,26 @@ impl Router {
                 return Ok(RouteDecision {
                     model_name: think_model.clone(),
                     route_type: RouteType::Think,
+                    matched_prompt: None,
+                });
+            }
+        }
+
+        // 6. Long Context (token count exceeds threshold)
+        if let Some(ref long_context_model) = self.config.router.long_context {
+            let threshold = self.config.router.long_context_threshold.unwrap_or(100_000);
+            if request.token_count.is_none() {
+                request.token_count = Some(self.estimate_token_count(request));
+            }
+            let token_count = request.token_count.unwrap_or(0);
+            if token_count >= threshold {
+                debug!(
+                    "📏 Routing to long-context model ({} tokens >= {})",
+                    token_count, threshold
+                );
+                return Ok(RouteDecision {
+                    model_name: long_context_model.clone(),
+                    route_type: RouteType::LongContext,
                     matched_prompt: None,
                 });
             }
@@ -942,6 +963,8 @@ mod tests {
                 background: Some("background.model".to_string()),
                 think: Some("think.model".to_string()),
                 websearch: Some("websearch.model".to_string()),
+                long_context: None,
+                long_context_threshold: Some(100_000),
                 auto_map_regex: None,   // Use default Claude pattern
                 background_regex: None, // Use default claude-haiku pattern
                 prompt_rules: vec![],   // No prompt rules by default
@@ -2982,5 +3005,65 @@ mod tests {
         // Rule matched, threshold check happened, token_count should be populated
         assert!(request.token_count.is_some());
         assert_eq!(decision.model_name, "target");
+    }
+
+    // ===== P5.4: Long Context routing =====
+
+    #[test]
+    fn test_long_context_triggers_when_token_count_exceeds_threshold() {
+        // long_context configured + token_count preset above threshold → routes to long_context model
+        let config = create_test_config();
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                long_context: Some("gemini-1m".to_string()),
+                long_context_threshold: Some(100),
+                auto_map_regex: Some("^$".to_string()), // disable auto-map
+                ..config.router
+            },
+            ..config
+        });
+        let mut request = make_request_with_model("claude-opus-4");
+        request.token_count = Some(200); // exceeds threshold 100
+        let decision = router.route(&mut request).unwrap();
+        assert_eq!(decision.model_name, "gemini-1m");
+        assert_eq!(decision.route_type, RouteType::LongContext);
+    }
+
+    #[test]
+    fn test_long_context_below_threshold_falls_through_to_default() {
+        // long_context configured but token_count below threshold → default
+        let config = create_test_config();
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                long_context: Some("gemini-1m".to_string()),
+                long_context_threshold: Some(100_000),
+                auto_map_regex: Some("^$".to_string()), // disable auto-map
+                ..config.router
+            },
+            ..config
+        });
+        let mut request = make_request_with_model("claude-opus-4");
+        request.token_count = Some(50); // below threshold
+        let decision = router.route(&mut request).unwrap();
+        assert_eq!(decision.route_type, RouteType::Default);
+        assert_ne!(decision.model_name, "gemini-1m");
+    }
+
+    #[test]
+    fn test_long_context_not_configured_skips_layer() {
+        // long_context = None → layer skipped, even with high token_count → default
+        let config = create_test_config();
+        let router = Router::new(AppConfig {
+            router: RouterConfig {
+                long_context: None,
+                auto_map_regex: Some("^$".to_string()), // disable auto-map
+                ..config.router
+            },
+            ..config
+        });
+        let mut request = make_request_with_model("claude-opus-4");
+        request.token_count = Some(999_999); // very high but no long_context configured
+        let decision = router.route(&mut request).unwrap();
+        assert_eq!(decision.route_type, RouteType::Default);
     }
 }

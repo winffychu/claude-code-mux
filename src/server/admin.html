@@ -1244,6 +1244,22 @@
                                 <option value="">Not configured</option>
                             </select>
                         </div>
+
+                        <div class="card">
+                            <h2 class="text-xl font-bold mb-6">
+                                Long Context Model
+                            </h2>
+                            <p class="text-gray-600 mb-6">
+                                Model used when request token count exceeds the threshold
+                            </p>
+                            <select name="long_context_model" class="input-field">
+                                <option value="">Not configured</option>
+                            </select>
+                            <label class="block text-sm font-medium text-gray-700 mt-4 mb-2">
+                                Long Context Threshold (tokens)
+                            </label>
+                            <input type="number" name="long_context_threshold" class="input-field" min="1000" step="1000" placeholder="100000" value="100000" />
+                        </div>
                     </form>
 
                     <!-- Prompt Rules (read-only) -->
@@ -2744,6 +2760,10 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                     config.router.background || "";
                 document.querySelector('[name="websearch_model"]').value =
                     config.router.websearch || "";
+                document.querySelector('[name="long_context_model"]').value =
+                    config.router.long_context || "";
+                document.querySelector('[name="long_context_threshold"]').value =
+                    config.router.long_context_threshold || 100000;
 
                 // Update Test tab models list
                 loadTestModels();
@@ -2836,12 +2856,18 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                                     formData.get("background_model");
                                 const websearchModel =
                                     formData.get("websearch_model");
+                                const longContextModel =
+                                    formData.get("long_context_model");
+                                const longContextThreshold =
+                                    formData.get("long_context_threshold");
 
                                 console.log("FormData values:", {
                                     default: defaultModel,
                                     think: thinkModel,
                                     background: backgroundModel,
                                     websearch: websearchModel,
+                                    long_context: longContextModel,
+                                    long_context_threshold: longContextThreshold,
                                 });
 
                                 if (!defaultModel) return; // Skip if required field is empty
@@ -2867,6 +2893,20 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                                         websearchModel;
                                 } else {
                                     delete appState.config.router.websearch;
+                                }
+
+                                if (longContextModel) {
+                                    appState.config.router.long_context =
+                                        longContextModel;
+                                } else {
+                                    delete appState.config.router.long_context;
+                                }
+
+                                const thresholdNum = parseInt(longContextThreshold, 10);
+                                if (longContextModel && thresholdNum && thresholdNum >= 1000) {
+                                    appState.config.router.long_context_threshold = thresholdNum;
+                                } else if (!longContextModel) {
+                                    delete appState.config.router.long_context_threshold;
                                 }
 
                                 console.log(
