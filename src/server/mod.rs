@@ -223,9 +223,12 @@ async fn get_config_json(State(state): State<Arc<AppState>>) -> impl IntoRespons
             "background": inner.config.router.background,
             "think": inner.config.router.think,
             "websearch": inner.config.router.websearch,
+            "long_context": inner.config.router.long_context,
+            "long_context_threshold": inner.config.router.long_context_threshold,
             "auto_map_regex": inner.config.router.auto_map_regex,
             "background_regex": inner.config.router.background_regex,
             "prompt_rules": inner.config.router.prompt_rules,
+            "rules": inner.config.router.rules,
         },
         "providers": inner.config.providers,
         "models": inner.config.models,
@@ -312,12 +315,27 @@ async fn update_config_json(
                 }
             }
 
-            // Optional fields - remove if not present
+            // Optional string fields - remove if not present
             update_field(router_table, "think", router.get("think"));
             update_field(router_table, "websearch", router.get("websearch"));
             update_field(router_table, "background", router.get("background"));
+            update_field(router_table, "long_context", router.get("long_context"));
             update_field(router_table, "auto_map_regex", router.get("auto_map_regex"));
             update_field(router_table, "background_regex", router.get("background_regex"));
+
+            // long_context_threshold is a number, not a string — handle separately
+            match router.get("long_context_threshold") {
+                Some(val) => {
+                    if let Some(n) = val.as_u64() {
+                        router_table.insert("long_context_threshold".to_string(), toml::Value::Integer(n as i64));
+                    } else if let Some(n) = val.as_i64() {
+                        router_table.insert("long_context_threshold".to_string(), toml::Value::Integer(n));
+                    }
+                }
+                None => {
+                    router_table.remove("long_context_threshold");
+                }
+            }
         }
     }
 
