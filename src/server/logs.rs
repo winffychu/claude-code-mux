@@ -12,9 +12,8 @@ use axum::{
     Json,
 };
 use chrono::{DateTime, Utc};
-use futures::stream::{self, Stream};
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::convert::Infallible;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -211,51 +210,59 @@ pub async fn get_logs(
 }
 
 /// GET /api/logs/stream —— SSE 实时流（轮询文件 mtime，500ms 间隔）
+///
+/// 用 mpsc channel + spawn task 推送 Event；
+/// axum `Sse` 负责 hyper 层的即时 flush (framing)。
 pub async fn stream_logs(
     State(state): State<Arc<AppState>>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+) -> Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>> {
+    use std::convert::Infallible;
     let path = state
         .message_tracer
         .trace_path()
         .unwrap_or_else(|| PathBuf::from("/dev/null"));
 
-    // 从当前文件末尾开始（只推送新行）
-    let initial_pos = std::fs::metadata(&path)
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let initial_pos = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
 
-    let stream = stream::unfold(
-        (path, initial_pos, SystemTime::now()),
-        |(path, pos, mut last_mtime)| async move {
-            loop {
-                tokio::time::sleep(Duration::from_millis(500)).await;
-                let metadata = match std::fs::metadata(&path) {
-                    Ok(m) => m,
-                    Err(_) => continue,
-                };
-                let mtime = metadata.modified().unwrap_or(SystemTime::now());
-                if mtime == last_mtime {
-                    continue;
-                }
-                let content = match std::fs::read_to_string(&path) {
-                    Ok(c) => c,
-                    Err(_) => continue,
-                };
-                let bytes = content.as_bytes();
-                if (pos as usize) >= bytes.len() {
-                    last_mtime = mtime;
-                    continue;
-                }
-                let new_content = &content[pos as usize..];
-                let new_pos = bytes.len() as u64;
-                let lines: Vec<&str> = new_content.lines().collect();
-                let event = Event::default().data(
-                    serde_json::json!({ "lines": lines }).to_string(),
-                );
-                return Some((Ok(event), (path, new_pos, mtime)));
+    let (sse_tx, sse_rx) = tokio::sync::mpsc::channel::<Event>(32);
+
+    tokio::spawn(async move {
+        let mut pos = initial_pos as usize;
+        let mut last_mtime = SystemTime::now();
+        loop {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let metadata = match std::fs::metadata(&path) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            let mtime = metadata.modified().unwrap_or(SystemTime::now());
+            if mtime == last_mtime {
+                continue;
             }
-        },
-    );
+            let content = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let bytes = content.as_bytes();
+            if pos >= bytes.len() {
+                last_mtime = mtime;
+                continue;
+            }
+            let new_content = &content[pos..];
+            pos = bytes.len();
+            let lines: Vec<&str> = new_content.lines().collect();
+            let payload = serde_json::json!({ "lines": lines }).to_string();
+            let event = Event::default().data(payload);
+            if sse_tx.send(event).await.is_err() {
+                break; // 客户端断开
+            }
+            last_mtime = mtime;
+        }
+    });
+
+    // mpsc Receiver → Stream<Result<Event, Infallible>>
+    let stream = tokio_stream::wrappers::ReceiverStream::new(sse_rx)
+        .map(|e: Event| Ok::<Event, Infallible>(e));
 
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
