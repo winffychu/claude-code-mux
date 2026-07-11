@@ -285,7 +285,7 @@ impl Router {
             }
         }
 
-        // 6. Default fallback
+        // 7. Default fallback
         // Use the transformed model name (from auto-mapping) or original if no mapping
         debug!("✅ Using model: {}", request.model);
         Ok(RouteDecision {

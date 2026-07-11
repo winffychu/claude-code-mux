@@ -92,7 +92,7 @@ pub struct RouterConfig {
     pub long_context_threshold: Option<u32>,
 }
 
-fn default_long_context_threshold() -> u32 { 100_000 }
+fn default_long_context_threshold() -> Option<u32> { Some(100_000) }
 ```
 
 - `Option<String>` + `Option<u32>` + `#[serde(default)]` 保持旧配置兼容
