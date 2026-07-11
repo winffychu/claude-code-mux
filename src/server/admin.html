@@ -193,6 +193,13 @@
                         >
                             Settings
                         </button>
+                        <button
+                            onclick="showTab('logs')"
+                            id="tab-logs"
+                            class="w-full text-left px-4 py-3 rounded-lg hover:bg-gray-50 transition-colors text-[15px] text-gray-600"
+                        >
+                            Logs
+                        </button>
                     </nav>
                 </div>
 
@@ -1407,6 +1414,41 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                     </form>
                 </div>
 
+                <!-- Logs Tab -->
+                <div id="content-logs" class="tab-content hidden">
+                    <h1 class="text-4xl font-bold mb-3">Request Logs</h1>
+                    <p class="text-gray-600 text-lg mb-12">
+                        Recent request traces from trace.jsonl (newest first)
+                    </p>
+
+                    <div id="logs-tracing-off" class="hidden card mb-6">
+                        <p class="text-gray-600">
+                            ⚠️ Tracing is not enabled. Enable it in Settings
+                            (<code>[tracing] enabled = true</code>) to start
+                            collecting logs.
+                        </p>
+                    </div>
+
+                    <div id="logs-toolbar" class="flex items-center gap-4 mb-6">
+                        <select id="logs-filter-dir" class="input-field max-w-xs" onchange="loadLogs()">
+                            <option value="">All directions</option>
+                            <option value="req">Requests (req)</option>
+                            <option value="res">Responses (res)</option>
+                            <option value="err">Errors (err)</option>
+                        </select>
+                        <input id="logs-filter-id" type="text" placeholder="Filter by trace ID" class="input-field max-w-xs" oninput="loadLogs()" />
+                        <label class="flex items-center gap-2 text-sm text-gray-600">
+                            <input id="logs-live" type="checkbox" onchange="toggleLogsStream()" /> Live (SSE)
+                        </label>
+                        <button onclick="loadLogs()" class="btn-primary text-sm px-4 py-2">Refresh</button>
+                        <span id="logs-count" class="text-sm text-gray-500 ml-auto"></span>
+                    </div>
+
+                    <div id="logs-list" class="space-y-2">
+                        <p class="text-gray-500 italic">No logs loaded. Click Refresh.</p>
+                    </div>
+                </div>
+
                 <!-- Test Tab -->
                 <div id="content-test" class="tab-content hidden">
                     <h1 class="text-4xl font-bold mb-3">Test Models</h1>
@@ -1809,6 +1851,107 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                 navigate({ tab: tabName, view: null });
             }
 
+            // ===== P5.2 Logs Tab =====
+            let logsEventSource = null;
+
+            async function loadLogs() {
+                const dir =
+                    document.getElementById("logs-filter-dir").value || "";
+                const id =
+                    document.getElementById("logs-filter-id").value.trim() ||
+                    "";
+                const params = new URLSearchParams({ limit: "100" });
+                if (dir) params.set("dir", dir);
+                if (id) params.set("id", id);
+
+                try {
+                    const resp = await fetch("/api/logs?" + params.toString());
+                    const data = await resp.json();
+                    const tracingOff = document.getElementById("logs-tracing-off");
+                    const list = document.getElementById("logs-list");
+                    const count = document.getElementById("logs-count");
+
+                    if (!data.tracing_enabled) {
+                        tracingOff.classList.remove("hidden");
+                        list.innerHTML = "";
+                        count.textContent = "";
+                        return;
+                    }
+                    tracingOff.classList.add("hidden");
+
+                    const entries = data.entries || [];
+                    count.textContent = `${entries.length} / ${data.total} entries`;
+                    if (entries.length === 0) {
+                        list.innerHTML =
+                            '<p class="text-gray-500 italic">No log entries.</p>';
+                        return;
+                    }
+                    list.innerHTML = entries.map(logEntryHtml).join("");
+                } catch (e) {
+                    console.error("loadLogs failed:", e);
+                }
+            }
+
+            function logEntryHtml(e) {
+                const ts = e.ts ? new Date(e.ts).toLocaleTimeString() : "";
+                const dirBadge =
+                    e.dir === "req" ? "bg-blue-100 text-blue-700" :
+                    e.dir === "res" ? "bg-green-100 text-green-700" :
+                    "bg-red-100 text-red-700";
+                let detail = "";
+                if (e.dir === "req") {
+                    detail = [e.model, e.provider, e.route_type, e.is_stream ? "stream" : ""]
+                        .filter(Boolean).join(" • ");
+                } else if (e.dir === "res") {
+                    detail = [e.latency_ms != null ? e.latency_ms + "ms" : "",
+                        e.stop_reason, e.input_tokens != null ? "in:" + e.input_tokens : "",
+                        e.output_tokens != null ? "out:" + e.output_tokens : ""]
+                        .filter(Boolean).join(" • ");
+                } else if (e.dir === "err") {
+                    detail = e.error || "";
+                }
+                return `<div class="card py-3 px-4 flex items-center gap-3 text-sm">
+                    <span class="text-gray-400 font-mono text-xs w-20">${ts}</span>
+                    <span class="px-2 py-0.5 rounded font-mono text-xs ${dirBadge}">${e.dir}</span>
+                    <span class="font-mono text-xs text-gray-500">${e.id}</span>
+                    <span class="flex-1 text-gray-700">${detail}</span>
+                </div>`;
+            }
+
+            function toggleLogsStream() {
+                const live = document.getElementById("logs-live").checked;
+                if (live) {
+                    startLogsStream();
+                } else {
+                    stopLogsStream();
+                }
+            }
+
+            function startLogsStream() {
+                stopLogsStream();
+                logsEventSource = new EventSource("/api/logs/stream");
+                logsEventSource.onmessage = (ev) => {
+                    try {
+                        const msg = JSON.parse(ev.data);
+                        if (msg.lines && msg.lines.length > 0) {
+                            loadLogs(); // 新行到达时刷新整列（简洁优先）
+                        }
+                    } catch (e) { /* ignore parse errors */ }
+                };
+                logsEventSource.onerror = () => {
+                    console.warn("logs SSE disconnected");
+                    stopLogsStream();
+                    document.getElementById("logs-live").checked = false;
+                };
+            }
+
+            function stopLogsStream() {
+                if (logsEventSource) {
+                    logsEventSource.close();
+                    logsEventSource = null;
+                }
+            }
+
             function handleRoute() {
                 const params = getURLParams();
                 const tab = params.get("tab") || "overview";
@@ -1875,6 +2018,8 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                     loadSettingsTab();
                 } else if (tab === "router") {
                     loadRouterTab();
+                } else if (tab === "logs") {
+                    loadLogs();
                 }
             }
 

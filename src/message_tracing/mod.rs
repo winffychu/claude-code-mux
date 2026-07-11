@@ -98,6 +98,16 @@ impl MessageTracer {
         }
     }
 
+    /// 返回 trace 文件路径（tracing 未启用时返回 None）
+    /// 供 /api/logs 端点读取日志用
+    pub fn trace_path(&self) -> Option<PathBuf> {
+        if self.file.is_some() {
+            Some(expand_tilde(&self.config.path))
+        } else {
+            None
+        }
+    }
+
     /// Trace an incoming request
     pub fn trace_request(
         &self,
