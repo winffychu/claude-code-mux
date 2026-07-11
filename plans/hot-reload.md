@@ -1,5 +1,7 @@
 # Hot-Reload Implementation Plan
 
+> 状态：已实施（2026-07-10，`ReloadableState` + `RwLock<Arc>` + `snapshot()` + `/api/reload` handler + admin.html `reloadConfig()` 全部落地，真机验证 hot-reload 正常工作）
+
 ## Problem
 
 When users click "Save & Restart" in the admin UI, the server restarts via a shell script that spawns a new process. This causes the new process to detach from the terminal, so users lose console log output.

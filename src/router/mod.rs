@@ -175,10 +175,11 @@ impl Router {
     /// 1. WebSearch - tool-based detection (web_search tool present)
     /// 2. Background - model name regex match (e.g., haiku) - checked early to save costs
     /// 3. Subagent - CCM-SUBAGENT-MODEL tag in system prompt
-    /// 4. Prompt Rules - regex pattern matching on user prompt (after background for cost savings)
-    /// 5. Think - Plan Mode / reasoning enabled
-    /// 6. Long Context - token count exceeds threshold (long_context model)
-    /// 7. Default - auto-mapped or original model name
+    /// 4. Router Rules - condition + model-prefix matching with rewrites
+    /// 5. Prompt Rules - regex pattern matching on user prompt (after background for cost savings)
+    /// 6. Think - Plan Mode / reasoning enabled
+    /// 7. Long Context - token count exceeds threshold (long_context model)
+    /// 8. Default - auto-mapped or original model name
     pub fn route(&self, request: &mut AnthropicRequest) -> Result<RouteDecision> {
         // Save original model for background task detection
         let original_model = request.model.clone();
@@ -253,7 +254,7 @@ impl Router {
             });
         }
 
-        // 5. Think mode (Plan Mode / Reasoning)
+        // 6. Think mode (Plan Mode / Reasoning)
         if let Some(ref think_model) = self.config.router.think {
             if self.is_plan_mode(request) {
                 debug!("🧠 Routing to think model (Plan Mode detected)");
@@ -265,7 +266,7 @@ impl Router {
             }
         }
 
-        // 6. Long Context (token count exceeds threshold)
+        // 7. Long Context (token count exceeds threshold)
         if let Some(ref long_context_model) = self.config.router.long_context {
             let threshold = self.config.router.long_context_threshold.unwrap_or(100_000);
             if request.token_count.is_none() {
@@ -285,7 +286,7 @@ impl Router {
             }
         }
 
-        // 7. Default fallback
+        // 8. Default fallback
         // Use the transformed model name (from auto-mapping) or original if no mapping
         debug!("✅ Using model: {}", request.model);
         Ok(RouteDecision {

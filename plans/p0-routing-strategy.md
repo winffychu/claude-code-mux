@@ -425,15 +425,15 @@ cargo test
 cargo clippy --no-deps
 ```
 
-新增单元测试：
-- `test_condition_rule_match`：验证 condition operator 各分支
-- `test_model_prefix_match`：验证 model-prefix 匹配
-- `test_rewrite_set_body_model`：验证 rewrite 修改 body.model
-- `test_rewrite_delete_header`：验证 rewrite 删除 header
-- `test_threshold_routing`：验证 token 阈值触发路由
-- `test_subagent_tool_injection`：验证 tool description 注入指令
-- `test_prompt_rules_backward_compat`：验证现有 prompt_rules 仍正常工作
-- `test_contains_deep_operator`：验证深度递归 JSON 搜索
+新增单元测试（计划名 vs 实际代码名，2026-07-11 审计核实）：
+- `test_condition_rule_match` → 实际：`test_router_rule_condition_eq_model` 等 condition operator 系列
+- `test_model_prefix_match` → 实际：`test_router_rule_model_prefix`
+- `test_rewrite_set_body_model` → 实际：`test_real_router_rule_rewrite_model`
+- `test_rewrite_delete_header` → 实际：`test_rewrite_header_delete`
+- `test_threshold_routing` → 实际：`test_threshold_blocks` / `test_threshold_passes` / `test_threshold_none` / `test_threshold_lazy_computation`（4 个）
+- `test_subagent_tool_injection` → 不存在（P0.3 未实施，该测试随功能一并跳过）
+- `test_prompt_rules_backward_compat` → 实际：`test_prompt_rule_*` 系列
+- `test_contains_deep_operator` → 实际：`test_contains_capture_reference`
 
 ---
 

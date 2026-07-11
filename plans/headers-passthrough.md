@@ -1,6 +1,7 @@
 # CCM Headers 透传实施计划
 
 > 分期实施，P1 立即落地，P2/P3 逐步扩展
+> 状态：P1 已实施（2026-07-10，`merge_forward_headers` 在 openai/anthropic_compatible/gemini 三个 provider 均已接入，真机验证 headers 透传正常）；P2/P3 未实施
 > 审计修正：2026-07-03 — 澄清 CCR 是 "header rewrite" 不是 "header passthrough" / 2026-07-09 三轮修正（见底部修正日志 #5-#7）
 
 ---
