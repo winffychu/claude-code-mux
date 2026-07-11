@@ -275,9 +275,12 @@ pub struct LogEntry {
 
 #### 3.3.3 SSE 实时流端点
 
-用已有依赖构造流（不引 async_stream），示例用 `tokio::sync::watch` channel + `futures::stream`:
+> **实现说明**（2026-07-11 审计修正）：下方示例使用 `tracer.watch_new()` 概念 API，实际实现因 axum 0.7 SSE 对 `unfold` stream poll 时序问题（只发 keep-alive 不发 data），改为 `tokio::spawn` task + `mpsc::channel` + `ReceiverStream` 方案。详见 `src/server/logs.rs` `stream_logs()` 函数（commit 64643c7）。
+
+用已有依赖构造流（不引 async_stream），示例用 `tokio::sync::watch` channel + `futures::stream`：
 
 ```rust
+// 示例（概念）—— 实际实现见 src/server/logs.rs stream_logs()
 use axum::response::sse::{Sse, Event, KeepAlive};
 
 async fn stream_logs(State(state): State<AppState>) -> Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>> {
@@ -292,7 +295,7 @@ async fn stream_logs(State(state): State<AppState>) -> Sse<impl futures::Stream<
 ```
 
 - SSE 依赖：axum 已含 `Sse` 响应类型（`axum::response::sse::{Sse, Event, KeepAlive}`，默认 feature 就含，无需新增 crate 或 feature flag）
-- `watch_new()` 实现：轮询文件 mtime + 读取 append 行（轻量，不引 notify 依赖），返回 `impl futures::Stream`
+- `watch_new()` 实现：轮询文件 mtime + 读取 append 行（轻量，不引 notify 依赖），返回 `impl futures::Stream`（**注意**：此为计划阶段概念 API，实际实现用 mpsc channel 替代，见上方实现说明）
 - 流构造用已有依赖：`futures = "0.3"` + `tokio-stream = "0.1"`（Cargo.toml L24/L23），用 `futures::stream::unfold` 或 `tokio::sync::watch` channel 构造，**不引 async_stream crate**
 
 #### 3.3.4 前端 — 新增 logs Tab
