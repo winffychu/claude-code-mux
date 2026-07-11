@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Admin</title>
+        <title data-i18n="app.title">Admin</title>
 
         <!-- htmx 2.0.8 -->
         <script src="https://unpkg.com/htmx.org@2.0.8"></script>
@@ -161,6 +161,7 @@
                         <button
                             onclick="showTab('overview')"
                             id="tab-overview"
+                            data-i18n="tab.overview"
                             class="tab-active w-full text-left px-4 py-3 rounded-lg hover:bg-gray-50 transition-colors text-[15px]"
                         >
                             Overview
@@ -168,6 +169,7 @@
                         <button
                             onclick="showTab('models')"
                             id="tab-models"
+                            data-i18n="tab.models"
                             class="w-full text-left px-4 py-3 rounded-lg hover:bg-gray-50 transition-colors text-[15px] text-gray-600"
                         >
                             Models
@@ -175,6 +177,7 @@
                         <button
                             onclick="showTab('providers')"
                             id="tab-providers"
+                            data-i18n="tab.providers"
                             class="w-full text-left px-4 py-3 rounded-lg hover:bg-gray-50 transition-colors text-[15px] text-gray-600"
                         >
                             Providers
@@ -182,6 +185,7 @@
                         <button
                             onclick="showTab('router')"
                             id="tab-router"
+                            data-i18n="tab.router"
                             class="w-full text-left px-4 py-3 rounded-lg hover:bg-gray-50 transition-colors text-[15px] text-gray-600"
                         >
                             Router
@@ -189,6 +193,7 @@
                         <button
                             onclick="showTab('settings')"
                             id="tab-settings"
+                            data-i18n="tab.settings"
                             class="w-full text-left px-4 py-3 rounded-lg hover:bg-gray-50 transition-colors text-[15px] text-gray-600"
                         >
                             Settings
@@ -196,6 +201,7 @@
                         <button
                             onclick="showTab('logs')"
                             id="tab-logs"
+                            data-i18n="tab.logs"
                             class="w-full text-left px-4 py-3 rounded-lg hover:bg-gray-50 transition-colors text-[15px] text-gray-600"
                         >
                             Logs
@@ -406,7 +412,7 @@
                 <!-- Providers Tab -->
                 <div id="content-providers" class="tab-content hidden">
                     <div id="providers-list-view">
-                        <h1 class="text-4xl font-bold mb-3">Providers</h1>
+                        <h1 class="text-4xl font-bold mb-3" data-i18n="tab.providers">Providers</h1>
                         <p class="text-gray-600 text-lg mb-12">
                             Connect and manage AI providers
                         </p>
@@ -973,7 +979,7 @@
                 <!-- Models Tab -->
                 <div id="content-models" class="tab-content hidden">
                     <div id="models-list-view">
-                        <h1 class="text-4xl font-bold mb-3">Models</h1>
+                        <h1 class="text-4xl font-bold mb-3" data-i18n="tab.models">Models</h1>
                         <p class="text-gray-600 text-lg mb-12">
                             Improve stability with multiple providers
                         </p>
@@ -1290,7 +1296,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
 
                 <!-- Settings Tab -->
                 <div id="content-settings" class="tab-content hidden">
-                    <h1 class="text-4xl font-bold mb-3">Settings</h1>
+                    <h1 class="text-4xl font-bold mb-3" data-i18n="tab.settings">Settings</h1>
                     <p class="text-gray-600 text-lg mb-12">
                         Manage router regex patterns and server settings
                     </p>
@@ -1703,6 +1709,52 @@ strip_match = false             # strip matched phrase (default: false)</pre>
         </div>
 
         <script>
+            // ===== P5.3 i18n 基础设施 =====
+            let ccmLocale = localStorage.getItem('ccmLocale') || 'zh-CN';
+            const ccmMessages = {};
+
+            async function loadI18n(loc) {
+                if (ccmMessages[loc]) return;
+                try {
+                    const r = await fetch(`/api/i18n/${loc}`);
+                    if (r.ok) ccmMessages[loc] = await r.json();
+                } catch (e) { /* fallback to key */ }
+            }
+
+            function t(key, ...args) {
+                let s = ccmMessages[ccmLocale]?.[key] ?? ccmMessages['zh-CN']?.[key] ?? key;
+                args.forEach((a, i) => { s = s.replace(`{${i}}`, a); });
+                return s;
+            }
+
+            async function applyI18n() {
+                await loadI18n(ccmLocale);
+                if (ccmLocale !== 'zh-CN') await loadI18n('zh-CN'); // fallback
+                document.querySelectorAll('[data-i18n]').forEach(el => {
+                    const k = el.getAttribute('data-i18n');
+                    if (k) el.textContent = t(k);
+                });
+                document.querySelectorAll('[data-i18n-ph]').forEach(el => {
+                    const k = el.getAttribute('data-i18n-ph');
+                    if (k) el.placeholder = t(k);
+                });
+                document.querySelectorAll('[data-i18n-title]').forEach(el => {
+                    const k = el.getAttribute('data-i18n-title');
+                    if (k) el.title = t(k);
+                });
+                document.querySelectorAll('[data-i18n-aria]').forEach(el => {
+                    const k = el.getAttribute('data-i18n-aria');
+                    if (k) el.setAttribute('aria-label', t(k));
+                });
+            }
+
+            async function setLocale(loc) {
+                ccmLocale = loc;
+                localStorage.setItem('ccmLocale', loc);
+                await applyI18n();
+            }
+            // ===== i18n end =====
+
             // GitHub repository URL (must match REPO_URL in registry.rs)
             const REPO_URL = "https://github.com/elidickinson/claude-code-mux";
 
@@ -4278,6 +4330,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
 
             // Initialize
             window.addEventListener("DOMContentLoaded", async () => {
+                await applyI18n();
                 await loadConfig();
                 handleRoute();
                 renderOverview();

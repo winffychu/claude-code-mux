@@ -1,6 +1,7 @@
 mod openai_compat;
 mod oauth_handlers;
 mod logs;
+mod i18n;
 
 use crate::cli::AppConfig;
 use crate::models::{AnthropicRequest, RouteType};
@@ -154,7 +155,8 @@ pub async fn start_server(config: AppConfig, config_path: std::path::PathBuf) ->
         .route("/api/oauth/tokens/delete", post(oauth_handlers::oauth_delete_token))
         .route("/api/oauth/tokens/refresh", post(oauth_handlers::oauth_refresh_token))
         .route("/api/logs", get(logs::get_logs))
-        .route("/api/logs/stream", get(logs::stream_logs));
+        .route("/api/logs/stream", get(logs::stream_logs))
+        .route("/api/i18n/:locale", get(i18n::get_i18n_dict));
 
     // Clone state before moving it
     let oauth_state = state.clone();

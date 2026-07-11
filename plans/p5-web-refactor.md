@@ -1,6 +1,6 @@
 # P5: Web 前端重构 + 长上下文路由 + 日志查看 + i18n
 
-> 状态：P5.4 已实施（本地+远程验证通过），P5.2 已实施（本地+远程+真实模型验证通过），P5.3/P5.1 待实施
+> 状态：P5.4 已实施（✅ 全验证），P5.2 已实施（✅ 全验证：审计22项100% + 真机SSE 321B + 密钥双路径8/8），P5.3 审计推进中，P5.1 待实施
 > 来源：用户增加 P1 级别需求（4 项）
 > 创建：2026-07-10
 > 依赖：P0.2 Token 阈值路由（已实施，`estimate_token_count` tiktoken BPE 基础设施可复用）
@@ -331,6 +331,11 @@ async fn stream_logs(State(state): State<AppState>) -> Sse<impl futures::Stream<
 轻量 JSON 词条 + `t(key)` 函数，无框架依赖（不引 i18next）。默认 `zh-CN`，`en` 可选。
 
 > **已拍板（§8 Q1）：en.json 需要**——P5.3 同时提供 `zh-CN.json`（默认）和 `en.json`。
+>
+> **已拍板（2026-07-11）：完整覆盖 ~200 词条，但专有名词保留原文不翻译**：
+> - 保留原文的：token（不翻"词元"）、router 路由（非"路由器"）、openai/openrouter/anthropic/deepseek 等品牌名、API/JSON/TOML/URL/SSE/OAuth 等技术缩写、provider type 名（openai/anthropic/openrouter 等）
+> - 翻译的：UI 标签、按钮、提示、标题、说明性文字
+> - 仅对"翻译不准确或会误导"的词保留原文
 
 ### 4.2 改动清单
 
