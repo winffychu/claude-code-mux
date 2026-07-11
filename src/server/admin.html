@@ -227,14 +227,14 @@
             <main class="flex-1 p-12 max-w-5xl">
                 <!-- Overview Tab -->
                 <div id="content-overview" class="tab-content">
-                    <h1 class="text-4xl font-bold mb-3">Routing Status</h1>
-                    <p class="text-gray-600 text-lg mb-12">
+                    <h1 class="text-4xl font-bold mb-3" data-i18n="label.routing_status">Routing Status</h1>
+                    <p class="text-gray-600 text-lg mb-12" data-i18n="label.routing_status_desc">
                         Monitor your AI routing configuration
                     </p>
 
                     <div class="grid grid-cols-3 gap-6 mb-12">
                         <div class="card">
-                            <div class="text-gray-600 text-sm mb-2">
+                            <div class="text-gray-600 text-sm mb-2" data-i18n="tab.providers">
                                 Providers
                             </div>
                             <div class="text-4xl font-bold" id="provider-count">
@@ -242,7 +242,7 @@
                             </div>
                         </div>
                         <div class="card">
-                            <div class="text-gray-600 text-sm mb-2">Models</div>
+                            <div class="text-gray-600 text-sm mb-2" data-i18n="tab.models">Models</div>
                             <div
                                 class="text-4xl font-bold"
                                 id="model-count-overview"
@@ -251,22 +251,22 @@
                             </div>
                         </div>
                         <div class="card">
-                            <div class="text-gray-600 text-sm mb-2">Status</div>
-                            <div class="text-4xl font-bold text-blue-600">
+                            <div class="text-gray-600 text-sm mb-2" data-i18n="label.status">Status</div>
+                            <div class="text-4xl font-bold text-blue-600" data-i18n="label.active">
                                 Active
                             </div>
                         </div>
                     </div>
 
                     <div class="card mb-6">
-                        <h2 class="text-2xl font-bold mb-6">
+                        <h2 class="text-2xl font-bold mb-6" data-i18n="heading.router_config">
                             Router Configuration
                         </h2>
                         <div class="space-y-4" id="router-status">
                             <div
                                 class="flex justify-between items-center py-3 border-b"
                             >
-                                <span class="text-gray-600">Default Model</span>
+                                <span class="text-gray-600" data-i18n="label.default_model">Default Model</span>
                                 <span class="font-semibold" id="current-default"
                                     >-</span
                                 >
@@ -274,7 +274,7 @@
                             <div
                                 class="flex justify-between items-center py-3 border-b"
                             >
-                                <span class="text-gray-600">Think Model</span>
+                                <span class="text-gray-600" data-i18n="label.think_model">Think Model</span>
                                 <span class="font-semibold" id="current-think"
                                     >-</span
                                 >
@@ -283,7 +283,7 @@
                                 class="flex justify-between items-center py-3 border-b"
                             >
                                 <span class="text-gray-600"
-                                    >Background Model</span
+                                    data-i18n="label.background_model">Background Model</span
                                 >
                                 <span
                                     class="font-semibold"
@@ -293,7 +293,7 @@
                             </div>
                             <div class="flex justify-between items-center py-3">
                                 <span class="text-gray-600"
-                                    >WebSearch Model</span
+                                    data-i18n="label.websearch_model">WebSearch Model</span
                                 >
                                 <span
                                     class="font-semibold"
@@ -305,10 +305,10 @@
                     </div>
 
                     <div class="card">
-                        <h2 class="text-2xl font-bold mb-6">Server Info</h2>
+                        <h2 class="text-2xl font-bold mb-6" data-i18n="label.server_info">Server Info</h2>
                         <div class="space-y-4">
                             <div class="flex justify-between items-center py-3">
-                                <span class="text-gray-600">Address</span>
+                                <span class="text-gray-600" data-i18n="label.address">Address</span>
                                 <code
                                     class="font-mono text-sm"
                                     id="server-address"
@@ -1209,10 +1209,10 @@
 
                     <form id="router-form" class="space-y-6">
                         <div class="card">
-                            <h2 class="text-xl font-bold mb-6">
+                            <h2 class="text-xl font-bold mb-6" data-i18n="label.default_model">
                                 Default Model
                             </h2>
-                            <p class="text-gray-600 mb-6">
+                            <p class="text-gray-600 mb-6" data-i18n="label.default_model_desc">
                                 Model used for most requests
                             </p>
                             <select
@@ -1220,55 +1220,55 @@
                                 class="input-field"
                                 required
                             >
-                                <option value="">Select a model</option>
+                                <option value="" data-i18n="option.select_model">Select a model</option>
                             </select>
                         </div>
 
                         <div class="card">
-                            <h2 class="text-xl font-bold mb-6">Think Model</h2>
-                            <p class="text-gray-600 mb-6">
+                            <h2 class="text-xl font-bold mb-6" data-i18n="label.think_model">Think Model</h2>
+                            <p class="text-gray-600 mb-6" data-i18n="label.think_model_desc">
                                 Model used for complex reasoning tasks
                             </p>
                             <select name="think_model" class="input-field">
-                                <option value="">Not configured</option>
+                                <option value="" data-i18n="option.not_configured">Not configured</option>
                             </select>
                         </div>
 
                         <div class="card">
-                            <h2 class="text-xl font-bold mb-6">
+                            <h2 class="text-xl font-bold mb-6" data-i18n="label.background_model">
                                 Background Model
                             </h2>
-                            <p class="text-gray-600 mb-6">
+                            <p class="text-gray-600 mb-6" data-i18n="label.background_model_desc">
                                 Fast model used for simple tasks
                             </p>
                             <select name="background_model" class="input-field">
-                                <option value="">Not configured</option>
+                                <option value="" data-i18n="option.not_configured">Not configured</option>
                             </select>
                         </div>
 
                         <div class="card">
-                            <h2 class="text-xl font-bold mb-6">
+                            <h2 class="text-xl font-bold mb-6" data-i18n="label.websearch_model">
                                 WebSearch Model
                             </h2>
-                            <p class="text-gray-600 mb-6">
+                            <p class="text-gray-600 mb-6" data-i18n="label.websearch_model_desc">
                                 Model used when web search is needed
                             </p>
                             <select name="websearch_model" class="input-field">
-                                <option value="">Not configured</option>
+                                <option value="" data-i18n="option.not_configured">Not configured</option>
                             </select>
                         </div>
 
                         <div class="card">
-                            <h2 class="text-xl font-bold mb-6">
+                            <h2 class="text-xl font-bold mb-6" data-i18n="label.long_context_model">
                                 Long Context Model
                             </h2>
-                            <p class="text-gray-600 mb-6">
+                            <p class="text-gray-600 mb-6" data-i18n="label.long_context_model_desc">
                                 Model used when request token count exceeds the threshold
                             </p>
                             <select name="long_context_model" class="input-field">
-                                <option value="">Not configured</option>
+                                <option value="" data-i18n="option.not_configured">Not configured</option>
                             </select>
-                            <label class="block text-sm font-medium text-gray-700 mt-4 mb-2">
+                            <label class="block text-sm font-medium text-gray-700 mt-4 mb-2" data-i18n="label.long_context_threshold">
                                 Long Context Threshold (tokens)
                             </label>
                             <input type="number" name="long_context_threshold" class="input-field" min="1000" step="1000" placeholder="100000" value="100000" />
@@ -1277,15 +1277,15 @@
 
                     <!-- Prompt Rules (read-only) -->
                     <div class="card mt-6">
-                        <h2 class="text-xl font-bold mb-4">Prompt Rules</h2>
-                        <p class="text-gray-600 mb-4">
+                        <h2 class="text-xl font-bold mb-4" data-i18n="label.prompt_rules">Prompt Rules</h2>
+                        <p class="text-gray-600 mb-4" data-i18n="label.prompt_rules_desc">
                             Route to specific models when patterns match the prompt.
                         </p>
                         <div id="prompt-rules-list">
-                            <p class="text-gray-500 italic">No prompt rules configured</p>
+                            <p class="text-gray-500 italic" data-i18n="label.no_prompt_rules">No prompt rules configured</p>
                         </div>
                         <div class="mt-4 p-3 bg-gray-50 rounded text-sm text-gray-600">
-                            <p class="font-semibold mb-1">Add to config.toml:</p>
+                            <p class="font-semibold mb-1" data-i18n="toast.add_to_config">Add to config.toml:</p>
                             <pre class="font-mono text-xs bg-gray-100 p-2 rounded overflow-x-auto">[[router.prompt_rules]]
 pattern = "(?i)commit.*change"  # regex or plain string
 model = "your-model-name"
@@ -1392,7 +1392,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                                     class="text-center py-8 hidden"
                                 >
                                     <div class="text-gray-500 mb-4">
-                                        No OAuth tokens found
+                                        <span data-i18n="label.no_oauth_tokens">No OAuth tokens found</span>
                                     </div>
                                     <p class="text-sm text-gray-600 mb-4">
                                         Add a provider with OAuth authentication
@@ -1402,9 +1402,23 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                             </div>
                         </div>
 
+                        <!-- Language Selection (P5.3) -->
+                        <div class="card">
+                            <h2 class="text-xl font-bold mb-4" data-i18n="label.interface_language">
+                                Interface Language
+                            </h2>
+                            <p class="text-gray-600 mb-4" data-i18n="label.interface_language_desc">
+                                Choose the display language for the admin UI
+                            </p>
+                            <select id="locale-select" class="input-field" onchange="setLocale(this.value)">
+                                <option value="zh-CN">简体中文</option>
+                                <option value="en">English</option>
+                            </select>
+                        </div>
+
                         <!-- Server Actions -->
                         <div class="card">
-                            <h2 class="text-xl font-bold mb-4">
+                            <h2 class="text-xl font-bold mb-4" data-i18n="label.server_actions">
                                 Server Actions
                             </h2>
                             <div class="flex gap-4">
@@ -1412,6 +1426,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                                     type="button"
                                     onclick="reloadConfig()"
                                     class="btn-primary flex-1"
+                                    data-i18n="button.reload_config"
                                 >
                                     Reload Config
                                 </button>
@@ -1746,6 +1761,9 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                     const k = el.getAttribute('data-i18n-aria');
                     if (k) el.setAttribute('aria-label', t(k));
                 });
+                // 同步语言选择器当前值
+                const ls = document.getElementById('locale-select');
+                if (ls) ls.value = ccmLocale;
             }
 
             async function setLocale(loc) {
