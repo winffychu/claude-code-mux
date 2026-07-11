@@ -1,7 +1,7 @@
 # P0: 路由策略增强 — CCR 强项移植
 
 > 来源：`musistudio/claude-code-router` (CCR) vs `elidickinson/claude-code-mux` (CCM) 代码级对比
-> 状态：已实施（2026-07-10）
+> 状态：P0.1 Router Rules + P0.2 Token 阈值路由 已实施（2026-07-10，真机验证 route=default/long-context 触发正确）；P0.3 Subagent Tool Description 注入 未实施（基准审计 2026-07-11 发现：`src/router/agent.rs` 不存在 / git 0 commit / 0 测试；现有 `extract_subagent_model` mod.rs:902 仅做 `system prompt` tag 提取，非 `tool description` 注入增量）
 > 预估：~260 行，6h
 > 审计修正：2026-07-03 — 4 处断言修正（见底部"审计修正日志"）
 
