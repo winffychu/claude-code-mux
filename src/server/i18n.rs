@@ -40,8 +40,6 @@ pub async fn get_i18n_dict(Path(locale): Path<String>) -> impl IntoResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn zh_cn_json_is_valid() {
         let s = include_str!("i18n/zh-CN.json");
