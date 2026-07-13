@@ -1292,9 +1292,18 @@ model = "your-model-name"
 strip_match = false             # strip matched phrase (default: false)</pre>
                         </div>
                     </div>
-                </div>
 
-                <!-- Settings Tab -->
+                    <!-- Router Rules (read-only) -->
+                    <div class="card mt-6">
+                        <h2 class="text-xl font-bold mb-4">Router Rules</h2>
+                        <p class="text-gray-600 mb-4">
+                            Condition-based and model-prefix rules with rewrites (configured via TOML).
+                        </p>
+                        <div id="router-rules-list">
+                            <p class="text-gray-500 italic">No router rules configured</p>
+                        </div>
+                    </div>
+                </div>
                 <div id="content-settings" class="tab-content hidden">
                     <h1 class="text-4xl font-bold mb-3" data-i18n="tab.settings">Settings</h1>
                     <p class="text-gray-600 text-lg mb-12">
@@ -2148,6 +2157,42 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                         </table>
                     `;
                 }
+
+                // Display router rules (read-only)
+                const routerRulesList = document.getElementById("router-rules-list");
+                if (routerRulesList) {
+                    const routerRules = config.router.rules || [];
+                    if (routerRules.length === 0) {
+                        routerRulesList.innerHTML = '<p class="text-gray-500 italic">No router rules configured</p>';
+                    } else {
+                        routerRulesList.innerHTML = `
+                            <table class="w-full text-sm">
+                                <thead>
+                                    <tr class="text-left text-gray-600 border-b">
+                                        <th class="pb-2 font-semibold">Type</th>
+                                        <th class="pb-2 font-semibold">Match</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${routerRules.map(rule => {
+                                        if (rule.type === "condition") {
+                                            return `<tr class="border-b border-gray-100">
+                                                <td class="py-2 font-mono text-xs">condition</td>
+                                                <td class="py-2 font-mono text-xs">${escapeHtml(rule.left || '')} ${escapeHtml(rule.operator || '')} ${escapeHtml(rule.right || '')}</td>
+                                            </tr>`;
+                                        } else if (rule.type === "model-prefix") {
+                                            return `<tr class="border-b border-gray-100">
+                                                <td class="py-2 font-mono text-xs">model-prefix</td>
+                                                <td class="py-2 font-mono text-xs">${escapeHtml(rule.prefix || '')}</td>
+                                            </tr>`;
+                                        }
+                                        return `<tr class="border-b border-gray-100"><td class="py-2 font-mono text-xs">${escapeHtml(rule.type || 'unknown')}</td><td class="py-2 text-gray-500">—</td></tr>`;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                        `;
+                    }
+                }
             }
 
             function loadSettingsTab() {
@@ -2964,7 +3009,20 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                     `${modelCount}`;
 
                 // Populate model selects with registered models
-                populateModelSelects(config.models || []);
+                // Collect from both config.models (model mappings) and providers[].models
+                const allModels = [...(config.models || [])];
+                if (config.providers) {
+                    for (const p of config.providers) {
+                        if (p.models) {
+                            for (const m of p.models) {
+                                if (!allModels.some(existing => existing.name === m)) {
+                                    allModels.push({ name: m });
+                                }
+                            }
+                        }
+                    }
+                }
+                populateModelSelects(allModels);
 
                 // Populate router form
                 document.querySelector('[name="default_model"]').value =

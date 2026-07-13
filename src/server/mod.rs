@@ -420,6 +420,9 @@ async fn handle_openai_chat_completions(
     // Get snapshot of reloadable state
     let inner = state.snapshot();
 
+    // Generate trace ID for correlating request/response
+    let trace_id = state.message_tracer.new_trace_id();
+
     // Streaming is not supported for /v1/chat/completions
     if openai_request.stream == Some(true) {
         return Err(AppError::ParseError(
@@ -523,6 +526,15 @@ async fn handle_openai_chat_completions(
                     write_routing_info(&mapping.actual_model, &mapping.provider, &decision.route_type);
                 }
 
+                // Trace the request
+                state.message_tracer.trace_request(
+                    &trace_id,
+                    &anthropic_request,
+                    &mapping.provider,
+                    &decision.route_type,
+                    false, // /v1/chat/completions does not support streaming
+                );
+
                 match provider.send_message(anthropic_request.clone()).await {
                     Ok(anthropic_response) => {
                         // Calculate and log metrics
@@ -535,6 +547,9 @@ async fn handle_openai_chat_completions(
                             write_routing_info(&mapping.actual_model, &mapping.provider, &decision.route_type);
                         }
 
+                        // Trace the response
+                        state.message_tracer.trace_response(&trace_id, &anthropic_response, latency_ms);
+
                         // Transform Anthropic response to OpenAI format
                         let openai_response = openai_compat::transform_anthropic_to_openai(
                             anthropic_response,
@@ -544,6 +559,7 @@ async fn handle_openai_chat_completions(
                         return Ok(Json(openai_response).into_response());
                     }
                     Err(e) => {
+                        state.message_tracer.trace_error(&trace_id, &e.to_string());
                         info!("⚠️ Provider {} failed: {}, trying next fallback", mapping.provider, e);
                         continue;
                     }
@@ -568,17 +584,31 @@ async fn handle_openai_chat_completions(
             // Update model to routed model
             anthropic_request.model = decision.model_name.clone();
 
-            let anthropic_response = provider.send_message(anthropic_request)
-                .await
-                .map_err(|e| AppError::ProviderError(e.to_string()))?;
-
-            // Transform to OpenAI format
-            let openai_response = openai_compat::transform_anthropic_to_openai(
-                anthropic_response,
-                model,
+            // Trace the request
+            state.message_tracer.trace_request(
+                &trace_id,
+                &anthropic_request,
+                "direct",
+                &decision.route_type,
+                false,
             );
 
-            return Ok(Json(openai_response).into_response());
+            match provider.send_message(anthropic_request).await {
+                Ok(anthropic_response) => {
+                    let latency_ms = start_time.elapsed().as_millis() as u64;
+                    state.message_tracer.trace_response(&trace_id, &anthropic_response, latency_ms);
+
+                    let openai_response = openai_compat::transform_anthropic_to_openai(
+                        anthropic_response,
+                        model,
+                    );
+                    return Ok(Json(openai_response).into_response());
+                }
+                Err(e) => {
+                    state.message_tracer.trace_error(&trace_id, &e.to_string());
+                    return Err(AppError::ProviderError(e.to_string()));
+                }
+            }
         }
 
         error!("❌ No model mapping or provider found for model: {}", decision.model_name);
