@@ -216,9 +216,21 @@ async fn handle_list_models(
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
     let inner = state.snapshot();
-    let models: Vec<serde_json::Value> = inner
-        .provider_registry
-        .list_models()
+    let mut model_set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+
+    // 1. Models with explicit mappings (model_to_provider keys)
+    for m in inner.provider_registry.list_models() {
+        model_set.insert(m);
+    }
+
+    // 2. Models declared in provider configs (providers[].models)
+    for p in &inner.config.providers {
+        for m in &p.models {
+            model_set.insert(m.clone());
+        }
+    }
+
+    let models: Vec<serde_json::Value> = model_set
         .into_iter()
         .map(|m| serde_json::json!({
             "id": m,
