@@ -1,0 +1,335 @@
+# =============================================================================
+# Claude Code Mux (CCM) — Example Configuration
+# =============================================================================
+#
+# Copy this file to ~/.claude-code-mux/config.toml and edit the placeholders.
+# All values below are examples — replace <your-*> placeholders with your own.
+#
+# You can also configure CCM via the web UI at http://127.0.0.1:13456
+# (or whatever host/port you set in [server] below).
+
+# -----------------------------------------------------------------------------
+# [server] — HTTP server settings
+# -----------------------------------------------------------------------------
+[server]
+# Port the proxy listens on. Default: 13456 (or 3456 if built from source
+# without the fork's default override).
+port = 13456
+
+# Bind address. Use "127.0.0.1" for localhost-only; "0.0.0.0" to allow
+# connections from other machines on your network.
+host = "127.0.0.1"
+
+# Log level: "error", "warn", "info", "debug", "trace".
+# The RUST_LOG environment variable, if set, overrides this.
+log_level = "info"
+
+# Optional: API key clients must present to access CCM.
+# When set, requests must include `x-api-key: <this-value>`.
+# Can reference an env var with the `$VAR_NAME` syntax:
+#   api_key = "$MY_CCM_KEY"
+# api_key = "<your-ccm-api-key>"
+
+# -----------------------------------------------------------------------------
+# [server.timeouts] — HTTP client timeouts (all optional, have defaults)
+# -----------------------------------------------------------------------------
+[server.timeouts]
+# Total time to wait for a provider API response. Default: 600_000 (10 min).
+api_timeout_ms = 600_000
+
+# Time to wait for the initial TCP connection. Default: 10_000 (10 s).
+connect_timeout_ms = 10_000
+
+# -----------------------------------------------------------------------------
+# [server.tracing] — Message tracing / request logging to JSONL
+# -----------------------------------------------------------------------------
+# Logs full request and response bodies to a JSONL file for debugging.
+# One JSON object per line, tagged with direction (req/res/err) and an
+# opaque request ID so you can correlate request/response pairs.
+[server.tracing]
+# Enable message tracing. Default: false.
+enabled = false
+
+# Path to the trace JSONL file. Default: ~/.claude-code-mux/trace.jsonl.
+# Supports `~` shorthand for the home directory.
+path = "~/.claude-code-mux/trace.jsonl"
+
+# Omit the system prompt from trace entries. Default: true.
+# System prompts are often very large; keeping this true reduces file size
+# and protects potentially sensitive system-prompt content.
+omit_system_prompt = true
+
+# =============================================================================
+# [router] — Routing configuration
+# =============================================================================
+# Controls how incoming requests are routed to models.
+# Routing priority order:
+#   auto-map  →  websearch  →  background  →  subagent  →  prompt_rules
+#            →  think  →  router.rules  →  long_context  →  default
+[router]
+
+# Default model used when no routing condition matches.
+# This is the only required field in [router].
+# Must match a model name defined under [[models]] below.
+default = "minimax-m2"
+
+# Model used for background tasks (e.g., simple, low-cost operations).
+# When background_regex matches the original model name, the request is
+# routed to this model instead.
+# background = "glm-4.5-air"
+
+# Model used for thinking/reasoning tasks (Claude Code Plan Mode).
+# Triggered when the request has `thinking: { type: "enabled" }`.
+# think = "kimi-k2-thinking"
+
+# Model used when the request includes a `web_search` tool.
+# websearch = "glm-4.6"
+
+# Model used when the request token count exceeds long_context_threshold.
+# This lets you route large-context requests to a model with a bigger
+# context window (e.g., 256K or 1M tokens) while keeping smaller requests
+# on a cheaper model.
+# long_context = "kimi-k2-thinking"
+
+# Token threshold (as a u32 integer) that triggers long_context routing.
+# When the request's estimated token count >= this value, the request is
+# routed to the long_context model. Default: 100_000.
+# long_context_threshold = 100_000
+
+# Regex pattern for auto-mapping (transforming) model names BEFORE routing.
+# If a request's model name matches this regex, it is transformed to the
+# default model. Empty/null = only Claude models are auto-mapped.
+# Example: "^claude-" transforms "claude-sonnet-4-5" → "minimax-m2"
+# auto_map_regex = "^claude-"
+
+# Regex pattern for detecting background tasks.
+# Matched against the ORIGINAL model name (before auto-mapping).
+# Empty/null = defaults to `(?i)claude.*haiku`.
+# background_regex = "(?i)claude.*haiku"
+
+# -----------------------------------------------------------------------------
+# [[router.prompt_rules]] — Prompt-based routing (first match wins)
+# -----------------------------------------------------------------------------
+# Each rule matches a regex against the last user message. If the pattern
+# matches, the request is routed to the specified model. Rules are checked
+# in order; the first match wins.
+#
+# The `model` field can reference capture groups from the regex:
+#   $1, $name, ${1}, ${name}, or mixed like "prefix-$1"
+
+# Example: Route "commit changes" requests to a fast model
+[[router.prompt_rules]]
+# Regex pattern to match against the user's last message content.
+# Supports capture groups: (...) or named: (?P<name>...)
+pattern = "(?i)commit.*changes"
+
+# Model to route to when pattern matches. Can reference capture groups.
+model = "minimax-m2"
+
+# Optional description for human readability (not parsed by CCM).
+description = "Route git commit tasks to the fast model"
+
+# Strip the matched phrase from the prompt before forwarding.
+# Default: false.
+strip_match = false
+
+# Example: Route "[fast]" tag to a fast model, stripping the tag
+# [[router.prompt_rules]]
+# pattern = "\\[fast\\]"
+# model = "minimax-m2"
+# description = "Explicit fast-request tag"
+# strip_match = true
+
+# -----------------------------------------------------------------------------
+# [[router.rules]] — Condition-based / model-prefix rules with rewrites
+# -----------------------------------------------------------------------------
+# Advanced rules that match on request fields and apply rewrites.
+# Two rule types, selected by the `type` field:
+#
+#   type = "model-prefix"  — matches if the model name starts with `prefix`
+#   type = "condition"     — compares a request field (left op right)
+#
+# When matched, you can either set `model` as a convenience (equivalent to
+# rewriting request.body.model) or provide explicit `rewrite` entries.
+
+# Example 1: Model-prefix rule — rewrite all gpt-* requests to glm-4.6
+[[router.rules]]
+# Unique identifier (optional, for reference/logging).
+id = "gpt-to-glm"
+
+# Human-readable name (optional).
+name = "Route GPT models to GLM"
+
+# Rule type: "model-prefix" or "condition".
+type = "model-prefix"
+
+# Prefix to match against the model name.
+prefix = "gpt-"
+
+# Whether this rule is enabled. Default: true.
+enabled = true
+
+# Convenience: set the model directly (equivalent to
+#   rewrite = [{ key = "request.body.model", operation = "set", value = "glm-4.6" }]
+model = "glm-4.6"
+
+# Optional: only apply the rule when request token count >= threshold.
+# threshold = 50_000
+
+# Example 2: Condition-based rule with explicit rewrites
+# [[router.rules]]
+# id = "force-glm-for-large"
+# name = "Force GLM for large requests"
+# type = "condition"
+# # Condition fields (flattened into the rule):
+# #   left    — path to the value to compare (e.g. "request.body.model")
+# #   operator — comparison operator
+# #   right   — value to compare against
+# left = "request.body.model"
+# operator = "starts-with"   # "==", "!=", ">", ">=", "<", "<=",
+#                             # "contains", "contains-deep",
+#                             # "not-contains", "starts-with"
+# right = "claude-"
+# enabled = true
+# threshold = 1
+#
+# # Rewrites to apply when the rule matches.
+# [[router.rules.rewrite]]
+# # Path to the field to modify (e.g. "request.body.model").
+# key = "request.body.model"
+# # Operation: "set", "delete", "array-append", "array-prepend",
+# #            "array-remove", "array-replace". Default: "set".
+# operation = "set"
+# # Value to set/append/replace with.
+# value = "glm-4.6"
+# # Optional match condition for array operations.
+# # match = "some-array-element"
+
+# =============================================================================
+# [[providers]] — AI provider configuration
+# =============================================================================
+# Each provider is a backend API endpoint. CCM translates Anthropic-format
+# requests to/from the provider's native format automatically.
+
+# Example: Anthropic-compatible provider (native Claude API)
+[[providers]]
+# Unique name for this provider (referenced by model mappings).
+name = "anthropic"
+
+# Provider type — determines API format and translation logic.
+# Values: "anthropic", "openai", "openrouter", "gemini", "vertex",
+#         "zenmux", "zai", "minimax", "kimi", etc.
+# Deprecated presets: "deepinfra", "novita", "together", "fireworks",
+#                      "groq", "nebius", "cerebras", "moonshot"
+# (these still work but you should migrate to "openai" + base_url).
+provider_type = "anthropic"
+
+# Authentication type: "api_key" or "oauth".
+auth_type = "api_key"
+
+# API key (required when auth_type = "api_key").
+# Can reference an env var with $VAR_NAME syntax.
+api_key = "<your-anthropic-api-key>"
+
+# Base URL override (optional for well-known providers).
+# base_url = "https://api.anthropic.com"
+
+# Custom HTTP headers to send with every request to this provider.
+# headers = { "X-Custom-Header" = "value" }
+
+# Models this provider supports (informational list).
+# models = ["claude-sonnet-4-5", "claude-haiku-4-5"]
+
+# Whether this provider is enabled. Default: true.
+enabled = true
+
+# Example: OpenAI-compatible provider
+[[providers]]
+name = "openai"
+provider_type = "openai"
+auth_type = "api_key"
+api_key = "<your-openai-api-key>"
+# base_url = "https://api.openai.com/v1"
+enabled = true
+
+# Example: OpenAI-compatible custom provider (e.g. z.ai)
+[[providers]]
+name = "zai"
+provider_type = "openai"
+auth_type = "api_key"
+api_key = "<your-zai-api-key>"
+base_url = "https://open.bigmodel.cn/api/paas/v4"
+enabled = true
+
+# Example: OpenRouter provider
+[[providers]]
+name = "openrouter"
+provider_type = "openrouter"
+auth_type = "api_key"
+api_key = "<your-openrouter-api-key>"
+# base_url defaults to https://openrouter.ai/api/v1
+enabled = true
+
+# Example: OAuth provider (Claude Pro/Max — free)
+# [[providers]]
+# name = "claude-max"
+# provider_type = "anthropic"
+# auth_type = "oauth"
+# # OAuth provider ID referencing a token in TokenStore
+# oauth_provider = "anthropic"
+
+# Example: Vertex AI provider (GCP)
+# [[providers]]
+# name = "vertex-ai"
+# provider_type = "vertex"
+# auth_type = "api_key"   # uses ADC under the hood
+# project_id = "<your-gcp-project-id>"
+# location = "us-central1"
+
+# =============================================================================
+# [[models]] — Model configuration with 1:N provider mappings
+# =============================================================================
+# Each model has a name (used in API requests) and one or more mappings to
+# providers. Mappings are tried in priority order (1 = highest) for
+# automatic failover.
+
+# Example: Single-provider model
+[[models]]
+# External model name — this is what clients specify in `model` field.
+name = "minimax-m2"
+
+# Provider mappings (fallback chain by priority).
+[[models.mappings]]
+# Provider name (must match a [[providers]] name above).
+provider = "minimax"
+# Actual model name at the provider.
+actual_model = "MiniMax-M2"
+# Priority for this mapping (1 = highest). Lower numbers are tried first.
+priority = 1
+# Inject a continuation prompt after tool results to keep the model working
+# through multi-step tasks (fixes premature stops). Default: false.
+# inject_continuation_prompt = false
+
+# Example: Multi-provider model with fallback
+[[models]]
+name = "glm-4.6"
+
+[[models.mappings]]
+provider = "zai"
+actual_model = "glm-4.6"
+priority = 1
+
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "z-ai/glm-4.6"
+priority = 2
+
+# Example: Model with continuation prompt injection enabled
+# [[models]]
+# name = "glm-4.5-air"
+#
+# [[models.mappings]]
+# provider = "zai"
+# actual_model = "glm-4.5-air"
+# priority = 1
+# inject_continuation_prompt = true

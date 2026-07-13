@@ -30,6 +30,7 @@ pub struct ReloadableState {
     pub config: AppConfig,
     pub router: Router,
     pub provider_registry: Arc<ProviderRegistry>,
+    pub message_tracer: Arc<MessageTracer>,
 }
 
 /// Application state shared across handlers
@@ -40,7 +41,6 @@ pub struct AppState {
     /// Persistent state - NOT reloaded
     pub token_store: TokenStore,
     pub config_path: std::path::PathBuf,
-    pub message_tracer: Arc<MessageTracer>,
 }
 
 impl AppState {
@@ -127,13 +127,13 @@ pub async fn start_server(config: AppConfig, config_path: std::path::PathBuf) ->
         config: config.clone(),
         router,
         provider_registry,
+        message_tracer,
     });
 
     let state = Arc::new(AppState {
         inner: std::sync::RwLock::new(reloadable),
         token_store,
         config_path,
-        message_tracer,
     });
 
     // Build router
@@ -142,6 +142,7 @@ pub async fn start_server(config: AppConfig, config_path: std::path::PathBuf) ->
         .route("/v1/messages", post(handle_messages))
         .route("/v1/messages/count_tokens", post(handle_count_tokens))
         .route("/v1/chat/completions", post(handle_openai_chat_completions))
+        .route("/v1/models", get(handle_list_models))
         .route("/health", get(health_check))
         .route("/api/config/json", get(get_config_json))
         .route("/api/config/json", post(update_config_json))
@@ -210,6 +211,27 @@ async fn health_check() -> impl IntoResponse {
     }))
 }
 
+/// GET /v1/models — list available models (OpenAI-compatible)
+async fn handle_list_models(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let inner = state.snapshot();
+    let models: Vec<serde_json::Value> = inner
+        .provider_registry
+        .list_models()
+        .into_iter()
+        .map(|m| serde_json::json!({
+            "id": m,
+            "object": "model",
+            "owned_by": "claude-code-mux",
+        }))
+        .collect();
+    Json(serde_json::json!({
+        "object": "list",
+        "data": models,
+    }))
+}
+
 /// Get full configuration as JSON (for admin UI)
 async fn get_config_json(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let inner = state.snapshot();
@@ -217,6 +239,11 @@ async fn get_config_json(State(state): State<Arc<AppState>>) -> impl IntoRespons
         "server": {
             "host": inner.config.server.host,
             "port": inner.config.server.port,
+            "tracing": {
+                "enabled": inner.config.server.tracing.enabled,
+                "path": inner.config.server.tracing.path,
+                "omit_system_prompt": inner.config.server.tracing.omit_system_prompt,
+            },
         },
         "router": {
             "default": inner.config.router.default,
@@ -339,6 +366,15 @@ async fn update_config_json(
         }
     }
 
+    // Update server.tracing section if provided
+    if let Some(server) = new_config.get("server") {
+        if let Some(tracing) = server.get("tracing") {
+            update_tracing_field(&mut config, "enabled", tracing.get("enabled"));
+            update_tracing_field(&mut config, "path", tracing.get("path"));
+            update_tracing_field(&mut config, "omit_system_prompt", tracing.get("omit_system_prompt"));
+        }
+    }
+
     // Write back to file
     let new_config_str = toml::to_string_pretty(&config)
         .map_err(|e| AppError::ParseError(format!("Failed to serialize config: {}", e)))?;
@@ -352,6 +388,54 @@ async fn update_config_json(
         "status": "success",
         "message": "Configuration saved successfully"
     })))
+}
+
+/// Update [server.tracing] section in config TOML
+fn update_tracing_field(
+    config: &mut toml::Value,
+    field: &str,
+    value: Option<&serde_json::Value>,
+) {
+    // Navigate to [server.tracing]
+    let server = config
+        .as_table_mut()
+        .and_then(|t| t.get_mut("server"))
+        .and_then(|s| s.as_table_mut());
+
+    let Some(server_table) = server else { return };
+    let tracing = server_table
+        .entry("tracing".to_string())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+    let Some(tracing_table) = tracing.as_table_mut() else {
+        return;
+    };
+
+    match field {
+        "enabled" => {
+            if let Some(val) = value {
+                if let Some(b) = val.as_bool() {
+                    tracing_table.insert("enabled".to_string(), toml::Value::Boolean(b));
+                }
+            }
+        }
+        "path" => {
+            if let Some(val) = value {
+                if let Some(s) = val.as_str() {
+                    tracing_table.insert("path".to_string(), toml::Value::String(s.to_string()));
+                }
+            } else {
+                tracing_table.remove("path");
+            }
+        }
+        "omit_system_prompt" => {
+            if let Some(val) = value {
+                if let Some(b) = val.as_bool() {
+                    tracing_table.insert("omit_system_prompt".to_string(), toml::Value::Boolean(b));
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Reload configuration without restarting the server
@@ -391,14 +475,18 @@ async fn reload_config(State(state): State<Arc<AppState>>) -> Response {
         }
     };
 
-    // 4. Create new reloadable state
+    // 4. Create new message tracer (so tracing config changes take effect)
+    let new_tracer = Arc::new(MessageTracer::new(new_config.server.tracing.clone()));
+
+    // 5. Create new reloadable state
     let new_inner = Arc::new(ReloadableState {
         config: new_config,
         router: new_router,
         provider_registry: new_registry,
+        message_tracer: new_tracer,
     });
 
-    // 5. Atomic swap (write lock held for microseconds)
+    // 6. Atomic swap (write lock held for microseconds)
     *state.inner.write().unwrap() = new_inner;
 
     info!("✅ Configuration reloaded successfully");
@@ -421,7 +509,7 @@ async fn handle_openai_chat_completions(
     let inner = state.snapshot();
 
     // Generate trace ID for correlating request/response
-    let trace_id = state.message_tracer.new_trace_id();
+    let trace_id = inner.message_tracer.new_trace_id();
 
     // Streaming is not supported for /v1/chat/completions
     if openai_request.stream == Some(true) {
@@ -527,7 +615,7 @@ async fn handle_openai_chat_completions(
                 }
 
                 // Trace the request
-                state.message_tracer.trace_request(
+                inner.message_tracer.trace_request(
                     &trace_id,
                     &anthropic_request,
                     &mapping.provider,
@@ -548,7 +636,7 @@ async fn handle_openai_chat_completions(
                         }
 
                         // Trace the response
-                        state.message_tracer.trace_response(&trace_id, &anthropic_response, latency_ms);
+                        inner.message_tracer.trace_response(&trace_id, &anthropic_response, latency_ms);
 
                         // Transform Anthropic response to OpenAI format
                         let openai_response = openai_compat::transform_anthropic_to_openai(
@@ -559,7 +647,7 @@ async fn handle_openai_chat_completions(
                         return Ok(Json(openai_response).into_response());
                     }
                     Err(e) => {
-                        state.message_tracer.trace_error(&trace_id, &e.to_string());
+                        inner.message_tracer.trace_error(&trace_id, &e.to_string());
                         info!("⚠️ Provider {} failed: {}, trying next fallback", mapping.provider, e);
                         continue;
                     }
@@ -585,7 +673,7 @@ async fn handle_openai_chat_completions(
             anthropic_request.model = decision.model_name.clone();
 
             // Trace the request
-            state.message_tracer.trace_request(
+            inner.message_tracer.trace_request(
                 &trace_id,
                 &anthropic_request,
                 "direct",
@@ -596,7 +684,7 @@ async fn handle_openai_chat_completions(
             match provider.send_message(anthropic_request).await {
                 Ok(anthropic_response) => {
                     let latency_ms = start_time.elapsed().as_millis() as u64;
-                    state.message_tracer.trace_response(&trace_id, &anthropic_response, latency_ms);
+                    inner.message_tracer.trace_response(&trace_id, &anthropic_response, latency_ms);
 
                     let openai_response = openai_compat::transform_anthropic_to_openai(
                         anthropic_response,
@@ -605,7 +693,7 @@ async fn handle_openai_chat_completions(
                     return Ok(Json(openai_response).into_response());
                 }
                 Err(e) => {
-                    state.message_tracer.trace_error(&trace_id, &e.to_string());
+                    inner.message_tracer.trace_error(&trace_id, &e.to_string());
                     return Err(AppError::ProviderError(e.to_string()));
                 }
             }
@@ -678,7 +766,7 @@ async fn handle_messages(
     let inner = state.snapshot();
 
     // Generate trace ID for correlating request/response
-    let trace_id = state.message_tracer.new_trace_id();
+    let trace_id = inner.message_tracer.new_trace_id();
 
     // DEBUG: Log request body for debugging
     if let Ok(json_str) = serde_json::to_string_pretty(&request_json) {
@@ -803,7 +891,7 @@ async fn handle_messages(
                 );
 
                 // Trace the request
-                state.message_tracer.trace_request(
+                inner.message_tracer.trace_request(
                     &trace_id,
                     &anthropic_request,
                     &mapping.provider,
@@ -850,7 +938,7 @@ async fn handle_messages(
                             return Ok(response);
                         }
                         Err(e) => {
-                            state.message_tracer.trace_error(&trace_id, &e.to_string());
+                            inner.message_tracer.trace_error(&trace_id, &e.to_string());
                             info!("⚠️ Provider {} streaming failed: {}, trying next fallback", mapping.provider, e);
                             continue;
                         }
@@ -869,7 +957,7 @@ async fn handle_messages(
                             info!("📊 {}@{} {}ms {:.0}t/s {}tok", mapping.actual_model, mapping.provider, latency_ms, tok_s, response.usage.output_tokens);
 
                             // Trace the response
-                            state.message_tracer.trace_response(&trace_id, &response, latency_ms);
+                            inner.message_tracer.trace_response(&trace_id, &response, latency_ms);
 
                             // Write routing info on fallback success (idx==0 already wrote above)
                             if idx > 0 {
@@ -879,7 +967,7 @@ async fn handle_messages(
                             return Ok(Json(response).into_response());
                         }
                         Err(e) => {
-                            state.message_tracer.trace_error(&trace_id, &e.to_string());
+                            inner.message_tracer.trace_error(&trace_id, &e.to_string());
                             info!("⚠️ Provider {} failed: {}, trying next fallback", mapping.provider, e);
                             continue;
                         }

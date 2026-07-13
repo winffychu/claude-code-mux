@@ -172,7 +172,8 @@ pub async fn get_logs(
 ) -> Result<Json<LogsResponse>, (StatusCode, String)> {
     let limit = q.limit.min(500);
 
-    let Some(path) = state.message_tracer.trace_path() else {
+    let inner = state.snapshot();
+    let Some(path) = inner.message_tracer.trace_path() else {
         return Ok(Json(LogsResponse {
             entries: Vec::new(),
             total: 0,
@@ -217,7 +218,8 @@ pub async fn stream_logs(
     State(state): State<Arc<AppState>>,
 ) -> Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>> {
     use std::convert::Infallible;
-    let path = state
+    let inner = state.snapshot();
+    let path = inner
         .message_tracer
         .trace_path()
         .unwrap_or_else(|| PathBuf::from("/dev/null"));

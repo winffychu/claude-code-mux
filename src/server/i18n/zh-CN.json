@@ -150,5 +150,17 @@
   "toast.reload_failed": "重新加载失败",
   "toast.reloaded": "已重新加载",
   "toast.save_failed": "保存失败",
-  "toast.saved": "已保存"
+  "toast.saved": "已保存",
+  "label.request_tracing": "请求追踪",
+  "label.request_tracing_desc": "启用请求日志记录，在日志页面追踪 API 调用",
+  "label.enable_tracing": "启用追踪",
+  "label.theme": "主题",
+  "label.dark_theme": "暗色",
+  "label.light_theme": "亮色",
+  "settings.tracing_enabled": "追踪已启用。日志将被记录。",
+  "settings.tracing_disabled": "追踪已禁用。不会记录日志。",
+  "toast.tracing_enabling": "正在启用追踪...",
+  "toast.tracing_disabling": "正在禁用追踪...",
+  "heading.request_logs": "请求日志",
+  "logs.description": "来自 trace.jsonl 的最近请求追踪（最新在前）"
 }

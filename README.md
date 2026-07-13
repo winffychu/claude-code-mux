@@ -44,6 +44,7 @@ This fork adds several significant improvements over the upstream project:
 - [Configuration Examples](#configuration-examples)
 - [Supported Providers](#supported-providers)
 - [Advanced Features](#advanced-features)
+- [API Endpoints](#api-endpoints)
 - [CLI Usage](#cli-usage)
 - [Troubleshooting](#troubleshooting)
 - [FAQ](#faq)
@@ -426,7 +427,7 @@ Navigate to **Test** tab:
 
 ## Routing Logic
 
-**Flow**: Auto-map (transform) → WebSearch > Background > Subagent > Think > Default
+**Flow**: Auto-map (transform) → WebSearch > Background > Subagent > Prompt Rules > Think > Router Rules > Long Context > Default
 
 ### 0. Auto-mapping (Model Name Transformation)
 - **Trigger**: Model name matches `auto_map_regex` pattern
@@ -469,6 +470,21 @@ Navigate to **Test** tab:
 - **Routes to**: `think` model (e.g., Kimi K2 Thinking, Claude Opus)
 - **Note**: The `thinking` parameter is passed through to Anthropic providers, enabling extended reasoning. OpenAI-compatible providers don't support this parameter.
 - **GLM Models**: The proxy extracts and displays GLM's `reasoning` output but does not preserve `reasoning_details` for conversation continuation.
+
+### 5.5. Router Rules (Advanced Rewrites)
+- **Trigger**: Request matches a configured `[[router.rules]]` entry
+- **Two rule types**:
+  - `model-prefix` — matches when the model name starts with a given `prefix`
+  - `condition` — compares a request field (`left`) against a `right` value using an `operator` (`==`, `!=`, `>`, `>=`, `<`, `<=`, `contains`, `contains-deep`, `not-contains`, `starts-with`)
+- **Action**: Apply rewrites to the request (set/delete model, modify fields, append/remove array items) or use the convenience `model` field to set the model directly
+- **Token threshold**: Rules can optionally require `token_count >= threshold` before triggering
+- **Configuration**: Set in Router config with `rules` array (see `config.example.toml`)
+
+### 5.6. Long Context Routing
+- **Trigger**: Request token count ≥ `long_context_threshold` (default: 100,000 tokens)
+- **Routes to**: `long_context` model (e.g., a 256K-context model like Kimi K2)
+- **Use case**: Route large-context requests to a model with a bigger window while keeping smaller requests on a cheaper/default model
+- **Configuration**: Set `long_context` and `long_context_threshold` in the `[router]` section
 
 ### 6. Default (Fallback)
 - **Trigger**: No routing conditions matched
@@ -524,6 +540,19 @@ Flow:
 4. Think check: No thinking field
 5. Default: Use model name as-is
 Result: glm-4.6 (original model name, routed through model mappings)
+```
+
+### Example 5: Long Context Routing
+```
+Request: model="claude-4-5-sonnet", token_count=120_000
+Config: auto_map_regex="^claude-", default="minimax-m2",
+        long_context="kimi-k2-thinking", long_context_threshold=100_000
+
+Flow:
+1. Auto-map: "claude-4-5-sonnet" → "minimax-m2" (transformed)
+2. WebSearch: No  → Background: No  → Think: No
+3. Long context check: token_count(120_000) >= threshold(100_000) → Route to "kimi-k2-thinking"
+Result: kimi-k2-thinking (long context model)
 ```
 
 ## Configuration Examples
@@ -861,14 +890,20 @@ This function:
 
 ### Message Tracing
 
-Log full request/response messages to JSONL for debugging:
+Log full request/response messages to JSONL for debugging. This is configured under the `[server.tracing]` section:
 
 ```toml
 [server.tracing]
-enabled = true
-path = "~/.claude-code-mux/trace.jsonl"
-omit_system_prompt = true  # Skip large system prompts
+enabled = true                # Enable tracing (default: false)
+path = "~/.claude-code-mux/trace.jsonl"  # JSONL output file path
+omit_system_prompt = true     # Skip large system prompts (default: true)
 ```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable/disable message tracing |
+| `path` | string | `~/.claude-code-mux/trace.jsonl` | Output file path (supports `~` for home dir) |
+| `omit_system_prompt` | bool | `true` | Omit system prompts from traces (reduces file size; system prompts are typically huge) |
 
 **Output format** (one JSON per line):
 ```jsonl
@@ -882,6 +917,46 @@ omit_system_prompt = true  # Skip large system prompts
 tail -f ~/.claude-code-mux/trace.jsonl | jq
 grep '"id":"a1b2c3d4"' trace.jsonl | jq  # Filter by request
 ```
+
+Traces are also accessible via the API endpoints `GET /api/logs` (paginated) and `GET /api/logs/stream` (real-time SSE). See [API Endpoints](#api-endpoints) below.
+
+## API Endpoints
+
+CCM exposes the following HTTP endpoints:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/v1/messages` | POST | Main Anthropic Messages API endpoint (proxy entry point) |
+| `/v1/messages/count_tokens` | POST | Anthropic token counting endpoint |
+| `/v1/chat/completions` | POST | OpenAI-compatible chat completions (non-streaming only) |
+| `/v1/models` | GET | List available models (OpenAI-compatible response) |
+| `/health` | GET | Health check endpoint |
+| `/api/config/json` | GET | Get current configuration as JSON |
+| `/api/config/json` | POST | Update configuration from JSON |
+| `/api/reload` | POST | Hot-reload configuration from file |
+| `/api/logs` | GET | Paginated trace log entries (newest first) |
+| `/api/logs/stream` | GET | Real-time trace log stream (SSE) |
+| `/api/i18n/:locale` | GET | i18n dictionary for the given locale (`zh-CN` or `en`) |
+| `/api/oauth/authorize` | POST | Get OAuth authorization URL |
+| `/api/oauth/exchange` | POST | Exchange OAuth code for tokens |
+| `/api/oauth/tokens` | GET | List all stored OAuth tokens |
+| `/api/oauth/tokens/refresh` | POST | Refresh an OAuth token |
+| `/api/oauth/tokens/delete` | POST | Delete an OAuth token |
+
+### i18n (Internationalization)
+
+The admin UI supports multiple languages. The `/api/i18n/:locale` endpoint returns the translation dictionary for the requested locale. Currently supported:
+
+- `zh-CN` — Simplified Chinese
+- `en` — English
+
+The frontend falls back to `zh-CN` when a translation key is not found, then to the key itself.
+
+### Dark Theme
+
+The admin UI supports both light and dark themes. The theme toggle button is in the sidebar (🌙/☀️ icon). Theme preference is persisted in `localStorage` and defaults to the system's `prefers-color-scheme` setting on first visit.
+
+See `config.example.toml` in the repository root for a fully commented example configuration covering all available options.
 
 ## CLI Usage
 

@@ -25,6 +25,34 @@
         <!-- Tailwind CSS -->
         <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
         <style type="text/tailwindcss">
+            /* Theme variables */
+            :root {
+                --bg-body: #f9fafb;
+                --text-body: #191f28;
+                --color-primary: #3182f6;
+                --color-primary-hover: #1b64da;
+                --bg-card: white;
+                --bg-secondary: #f2f4f6;
+                --text-secondary: #4e5968;
+                --border-input: #e5e8eb;
+                --text-label: #333d4b;
+                --text-helper: #6b7684;
+                --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04);
+            }
+            html.dark {
+                --bg-body: #0f172a;
+                --text-body: #e2e8f0;
+                --color-primary: #3b82f6;
+                --color-primary-hover: #60a5fa;
+                --bg-card: #1e293b;
+                --bg-secondary: #334155;
+                --text-secondary: #94a3b8;
+                --border-input: #334155;
+                --text-label: #cbd5e1;
+                --text-helper: #64748b;
+                --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.3);
+            }
+
             * {
                 font-family:
                     "Pretendard",
@@ -36,17 +64,18 @@
             }
 
             body {
-                background: #f9fafb;
-                color: #191f28;
+                background: var(--bg-body);
+                color: var(--text-body);
+                transition: background 0.3s, color 0.3s;
             }
 
             .tab-active {
-                color: #3182f6;
+                color: var(--color-primary);
                 font-weight: 600;
             }
 
             .btn-primary {
-                background: #3182f6;
+                background: var(--color-primary);
                 color: white;
                 padding: 16px 24px;
                 border-radius: 12px;
@@ -58,12 +87,12 @@
             }
 
             .btn-primary:hover {
-                background: #1b64da;
+                background: var(--color-primary-hover);
             }
 
             .btn-secondary {
-                background: #f2f4f6;
-                color: #4e5968;
+                background: var(--bg-secondary);
+                color: var(--text-secondary);
                 padding: 16px 24px;
                 border-radius: 12px;
                 font-weight: 600;
@@ -74,41 +103,44 @@
             }
 
             .btn-secondary:hover {
-                background: #e5e8eb;
+                background: var(--border-input);
             }
 
             .card {
-                background: white;
+                background: var(--bg-card);
                 border-radius: 16px;
                 padding: 32px;
-                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+                box-shadow: var(--shadow-card);
+                transition: background 0.3s;
             }
 
             .input-field {
                 width: 100%;
                 padding: 16px 20px;
-                border: 1.5px solid #e5e8eb;
+                border: 1.5px solid var(--border-input);
                 border-radius: 12px;
                 font-size: 16px;
+                background: var(--bg-card);
+                color: var(--text-body);
                 transition: all 0.2s;
             }
 
             .input-field:focus {
                 outline: none;
-                border-color: #3182f6;
+                border-color: var(--color-primary);
             }
 
             .label {
                 font-size: 15px;
                 font-weight: 600;
-                color: #333d4b;
+                color: var(--text-label);
                 margin-bottom: 8px;
                 display: block;
             }
 
             .helper-text {
                 font-size: 14px;
-                color: #6b7684;
+                color: var(--text-helper);
                 margin-top: 6px;
             }
 
@@ -143,6 +175,21 @@
             .fade-in {
                 animation: fadeIn 0.3s ease-out;
             }
+
+            /* Dark mode overrides for Tailwind utility classes */
+            html.dark .bg-white { background-color: var(--bg-card) !important; }
+            html.dark .bg-gray-50 { background-color: #1a2332 !important; }
+            html.dark .bg-gray-100 { background-color: #1e293b !important; }
+            html.dark .border-gray-200 { border-color: #334155 !important; }
+            html.dark .text-gray-600 { color: #94a3b8 !important; }
+            html.dark .text-gray-500 { color: #64748b !important; }
+            html.dark .text-gray-700 { color: #cbd5e1 !important; }
+            html.dark .hover\:bg-gray-50:hover { background-color: #1a2332 !important; }
+            html.dark code { background-color: #0f172a !important; color: #e2e8f0 !important; }
+            html.dark .bg-red-500\/20 { background-color: rgba(239,68,68,0.2) !important; }
+            html.dark .border-red-500\/50 { border-color: rgba(239,68,68,0.5) !important; }
+            html.dark .bg-green-500\/20 { background-color: rgba(34,197,94,0.2) !important; }
+            html.dark .border-green-500\/50 { border-color: rgba(34,197,94,0.5) !important; }
         </style>
     </head>
     <body>
@@ -211,6 +258,14 @@
 
                 <!-- Action Buttons -->
                 <div class="mt-auto border-t border-gray-200 p-6 space-y-3">
+                    <button
+                        onclick="toggleTheme()"
+                        id="theme-toggle"
+                        class="w-full btn-secondary text-sm py-3 flex items-center justify-center gap-2"
+                    >
+                        <span id="theme-icon">🌙</span>
+                        <span id="theme-label">Dark</span>
+                    </button>
                     <button
                         onclick="saveConfig()"
                         class="w-full btn-primary text-sm py-3"
@@ -1425,6 +1480,21 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                             </select>
                         </div>
 
+                        <!-- Tracing Settings -->
+                        <div class="card">
+                            <h2 class="text-xl font-bold mb-4" data-i18n="label.request_tracing">
+                                Request Tracing
+                            </h2>
+                            <p class="text-gray-600 mb-4" data-i18n="label.request_tracing_desc">
+                                Enable request logging to trace API calls in the Logs tab
+                            </p>
+                            <label class="flex items-center gap-3 cursor-pointer">
+                                <input id="tracing-enabled" type="checkbox" class="w-5 h-5" onchange="toggleTracing()" />
+                                <span data-i18n="label.enable_tracing">Enable tracing</span>
+                            </label>
+                            <p id="tracing-status" class="text-sm text-gray-500 mt-2"></p>
+                        </div>
+
                         <!-- Server Actions -->
                         <div class="card">
                             <h2 class="text-xl font-bold mb-4" data-i18n="label.server_actions">
@@ -1446,8 +1516,8 @@ strip_match = false             # strip matched phrase (default: false)</pre>
 
                 <!-- Logs Tab -->
                 <div id="content-logs" class="tab-content hidden">
-                    <h1 class="text-4xl font-bold mb-3">Request Logs</h1>
-                    <p class="text-gray-600 text-lg mb-12">
+                    <h1 class="text-4xl font-bold mb-3" data-i18n="heading.request_logs">Request Logs</h1>
+                    <p class="text-gray-600 text-lg mb-12" data-i18n="logs.description">
                         Recent request traces from trace.jsonl (newest first)
                     </p>
 
@@ -1468,7 +1538,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                         </select>
                         <input id="logs-filter-id" type="text" placeholder="Filter by trace ID" class="input-field max-w-xs" oninput="loadLogs()" />
                         <label class="flex items-center gap-2 text-sm text-gray-600">
-                            <input id="logs-live" type="checkbox" onchange="toggleLogsStream()" /> Live (SSE)
+                            <input id="logs-live" type="checkbox" onchange="toggleLogsStream()" disabled /> Live (SSE)
                         </label>
                         <button onclick="loadLogs()" class="btn-primary text-sm px-4 py-2">Refresh</button>
                         <span id="logs-count" class="text-sm text-gray-500 ml-auto"></span>
@@ -1782,6 +1852,38 @@ strip_match = false             # strip matched phrase (default: false)</pre>
             }
             // ===== i18n end =====
 
+            // ===== Theme =====
+            function applyTheme(dark) {
+                if (dark) {
+                    document.documentElement.classList.add("dark");
+                } else {
+                    document.documentElement.classList.remove("dark");
+                }
+                localStorage.setItem("ccmTheme", dark ? "dark" : "light");
+                const icon = document.getElementById("theme-icon");
+                const label = document.getElementById("theme-label");
+                if (icon) icon.textContent = dark ? "☀️" : "🌙";
+                if (label) label.textContent = dark ? "Light" : "Dark";
+            }
+
+            function toggleTheme() {
+                const isDark = document.documentElement.classList.contains("dark");
+                applyTheme(!isDark);
+            }
+
+            // Init theme from localStorage or prefers-color-scheme
+            (function initTheme() {
+                const saved = localStorage.getItem("ccmTheme");
+                if (saved) {
+                    applyTheme(saved === "dark");
+                } else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+                    applyTheme(true);
+                } else {
+                    applyTheme(false);
+                }
+            })();
+            // ===== Theme end =====
+
             // GitHub repository URL (must match REPO_URL in registry.rs)
             const REPO_URL = "https://github.com/elidickinson/claude-code-mux";
 
@@ -1954,9 +2056,15 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                         tracingOff.classList.remove("hidden");
                         list.innerHTML = "";
                         count.textContent = "";
+                        document.getElementById("logs-live").disabled = true;
+                        if (document.getElementById("logs-live").checked) {
+                            document.getElementById("logs-live").checked = false;
+                            stopLogsStream();
+                        }
                         return;
                     }
                     tracingOff.classList.add("hidden");
+                    document.getElementById("logs-live").disabled = false;
 
                     const entries = data.entries || [];
                     count.textContent = `${entries.length} / ${data.total} entries`;
@@ -2213,8 +2321,52 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                     backgroundRegexInput.value = router.background_regex || "";
                 }
 
+                // Load tracing toggle
+                const tracingToggle = document.getElementById("tracing-enabled");
+                const tracingStatus = document.getElementById("tracing-status");
+                if (tracingToggle && appState.config.server?.tracing) {
+                    tracingToggle.checked = !!appState.config.server.tracing.enabled;
+                    if (tracingStatus) {
+                        tracingStatus.textContent = tracingToggle.checked
+                            ? (i18n && i18n["settings.tracing_enabled"]) || "Tracing enabled. Logs will be recorded."
+                            : (i18n && i18n["settings.tracing_disabled"]) || "Tracing disabled. No logs will be recorded.";
+                    }
+                }
+
                 // Load OAuth tokens
                 loadOAuthTokens();
+            }
+
+            // Toggle tracing on/off via config update + reload
+            async function toggleTracing() {
+                const toggle = document.getElementById("tracing-enabled");
+                const status = document.getElementById("tracing-status");
+                if (!toggle) return;
+                const enabled = toggle.checked;
+                if (status) {
+                    status.textContent = enabled
+                        ? (i18n && i18n["toast.tracing_enabling"]) || "Enabling tracing..."
+                        : (i18n && i18n["toast.tracing_disabling"]) || "Disabling tracing...";
+                }
+                // Update config server.tracing.enabled
+                if (!appState.config.server) appState.config.server = {};
+                if (!appState.config.server.tracing) appState.config.server.tracing = {};
+                appState.config.server.tracing.enabled = enabled;
+                // syncToServer writes TOML, then reload picks up the new tracer
+                const ok = await syncToServer();
+                if (ok) {
+                    // Reload to activate the new tracer
+                    fetch("/api/reload", { method: "POST" }).then(() => {
+                        if (status) {
+                            status.textContent = enabled
+                                ? (i18n && i18n["settings.tracing_enabled"]) || "Tracing enabled. Logs will be recorded."
+                                : (i18n && i18n["settings.tracing_disabled"]) || "Tracing disabled. No logs will be recorded.";
+                        }
+                    });
+                } else {
+                    if (status) status.textContent = "Failed to update tracing config";
+                    toggle.checked = !enabled; // revert
+                }
             }
 
             // Provider Management

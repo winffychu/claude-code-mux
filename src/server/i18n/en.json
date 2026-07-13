@@ -150,5 +150,17 @@
   "toast.reload_failed": "Reload failed",
   "toast.reloaded": "Reloaded",
   "toast.save_failed": "Save failed",
-  "toast.saved": "Saved"
+  "toast.saved": "Saved",
+  "label.request_tracing": "Request Tracing",
+  "label.request_tracing_desc": "Enable request logging to trace API calls in the Logs tab",
+  "label.enable_tracing": "Enable tracing",
+  "label.theme": "Theme",
+  "label.dark_theme": "Dark",
+  "label.light_theme": "Light",
+  "settings.tracing_enabled": "Tracing enabled. Logs will be recorded.",
+  "settings.tracing_disabled": "Tracing disabled. No logs will be recorded.",
+  "toast.tracing_enabling": "Enabling tracing...",
+  "toast.tracing_disabling": "Disabling tracing...",
+  "heading.request_logs": "Request Logs",
+  "logs.description": "Recent request traces from trace.jsonl (newest first)"
 }
