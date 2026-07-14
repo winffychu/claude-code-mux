@@ -765,8 +765,30 @@ impl OpenAIProvider {
     /// - `message.content` → `text` content block
     /// - `message.tool_calls` → `tool_use` content blocks
     fn transform_response(&self, response: OpenAIResponse) -> ProviderResponse {
-        let choice = response.choices.into_iter().next()
-            .expect("OpenAI response must have at least one choice");
+        let choice = match response.choices.into_iter().next() {
+            Some(c) => c,
+            None => {
+                tracing::error!("OpenAI response has no choices");
+                return ProviderResponse {
+                    id: response.id,
+                    r#type: "message".to_string(),
+                    role: "assistant".to_string(),
+                    content: vec![ContentBlock::text(
+                        "[Error: provider returned empty choices]".to_string(),
+                        None,
+                    )],
+                    model: response.model,
+                    stop_reason: Some("error".to_string()),
+                    stop_sequence: None,
+                    usage: crate::providers::Usage {
+                        input_tokens: 0,
+                        output_tokens: 0,
+                        cache_creation_input_tokens: None,
+                        cache_read_input_tokens: None,
+                    },
+                };
+            }
+        };
 
         let mut content_blocks = Vec::new();
 
@@ -1560,7 +1582,11 @@ impl AnthropicProvider for OpenAIProvider {
                 match result {
                     Ok(sse_event) => {
                         // If stream already ended, don't process any more chunks
-                        if state.lock().unwrap().stream_ended {
+                        let stream_ended = match state.lock() {
+                            Ok(s) => s.stream_ended,
+                            Err(_) => true, // poisoned — treat as ended
+                        };
+                        if stream_ended {
                             tracing::debug!("⏹️ Stream already ended, skipping chunk");
                             return Ok(Bytes::new());
                         }
@@ -1598,11 +1624,17 @@ impl AnthropicProvider for OpenAIProvider {
                                 tracing::debug!("✨ Transforming chunk with {} choices", chunk.choices.len());
 
                                 // Transform to Anthropic format (raw SSE bytes)
-                                let sse_output = Self::transform_openai_chunk_to_anthropic_sse(
-                                    &chunk,
-                                    &message_id,
-                                    &mut *state.lock().unwrap()
-                                );
+                                let sse_output = match state.lock() {
+                                    Ok(mut s) => Self::transform_openai_chunk_to_anthropic_sse(
+                                        &chunk,
+                                        &message_id,
+                                        &mut *s,
+                                    ),
+                                    Err(_) => {
+                                        tracing::error!("Stream state mutex poisoned, ending stream");
+                                        return Ok(Bytes::new());
+                                    }
+                                };
 
                                 if !sse_output.is_empty() {
                                     tracing::debug!("SSE: {} bytes", sse_output.len());

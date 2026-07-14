@@ -23,7 +23,7 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing::{debug, error, info};
 use futures::stream::TryStreamExt;
-use chrono::Local;
+
 
 /// Reloadable components - rebuilt on config reload
 pub struct ReloadableState {
@@ -61,46 +61,50 @@ impl AppState {
 const RECENT_REQUESTS_WINDOW: usize = 20;
 
 /// Write routing information to file for statusline script
+/// Uses spawn_blocking to avoid blocking async worker threads
 fn write_routing_info(model: &str, provider: &str, route_type: &RouteType) {
-    if let Some(home) = dirs::home_dir() {
-        let file_path = home.join(".claude-code-mux/last_routing.json");
+    let model = model.to_string();
+    let provider = provider.to_string();
+    let route_type = route_type.to_string();
+    tokio::task::spawn_blocking(move || {
+        if let Some(home) = dirs::home_dir() {
+            let file_path = home.join(".claude-code-mux/last_routing.json");
 
-        // Read existing recent requests history
-        let mut recent: Vec<String> = Vec::new();
-        if let Ok(existing_content) = std::fs::read_to_string(&file_path) {
-            if let Ok(existing) = serde_json::from_str::<serde_json::Value>(&existing_content) {
-                if let Some(items) = existing.get("recent").and_then(|t| t.as_array()) {
-                    for item in items {
-                        if let Some(entry) = item.as_str() {
-                            recent.push(entry.to_string());
+            // Read existing recent requests history
+            let mut recent: Vec<String> = Vec::new();
+            if let Ok(existing_content) = std::fs::read_to_string(&file_path) {
+                if let Ok(existing) = serde_json::from_str::<serde_json::Value>(&existing_content) {
+                    if let Some(items) = existing.get("recent").and_then(|t| t.as_array()) {
+                        for item in items {
+                            if let Some(entry) = item.as_str() {
+                                recent.push(entry.to_string());
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // Add current model/provider to recent
-        let current_entry = format!("{}@{}", model, provider);
-        recent.insert(0, current_entry);
-        recent.truncate(RECENT_REQUESTS_WINDOW);
+            // Add current model/provider to recent
+            let current_entry = format!("{}@{}", model, provider);
+            recent.insert(0, current_entry);
+            recent.truncate(RECENT_REQUESTS_WINDOW);
 
-        // Create routing info
-        let routing_info = serde_json::json!({
-            "model": model,
-            "provider": provider,
-            "route_type": route_type.to_string(),
-            "timestamp": Local::now().format("%H:%M:%S").to_string(),
-            "recent": recent
-        });
+            // Create routing info
+            let routing_info = serde_json::json!({
+                "model": model,
+                "provider": provider,
+                "route_type": route_type,
+                "timestamp": chrono::Local::now().format("%H:%M:%S").to_string(),
+                "recent": recent
+            });
 
-        if let Ok(json) = serde_json::to_string(&routing_info) {
-            if let Err(e) = std::fs::write(file_path, json) {
-                tracing::debug!("Failed to write routing info: {}", e);
+            if let Ok(json) = serde_json::to_string(&routing_info) {
+                if let Err(e) = std::fs::write(file_path, json) {
+                    tracing::debug!("Failed to write routing info: {}", e);
+                }
             }
-        } else {
-            tracing::debug!("Failed to serialize routing info");
         }
-    }
+    });
 }
 
 /// Start the HTTP server
