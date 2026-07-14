@@ -237,8 +237,8 @@ api_key = "<your-anthropic-api-key>"
 # Custom HTTP headers to send with every request to this provider.
 # headers = { "X-Custom-Header" = "value" }
 
-# Models this provider supports (informational list).
-# models = ["claude-sonnet-4-5", "claude-haiku-4-5"]
+# Models this provider supports.
+models = ["claude-sonnet-4-5", "claude-haiku-4-5"]
 
 # Whether this provider is enabled. Default: true.
 enabled = true
@@ -250,6 +250,7 @@ provider_type = "openai"
 auth_type = "api_key"
 api_key = "<your-openai-api-key>"
 # base_url = "https://api.openai.com/v1"
+models = ["gpt-4o", "gpt-4o-mini"]
 enabled = true
 
 # Example: OpenAI-compatible custom provider (e.g. z.ai)
@@ -259,6 +260,7 @@ provider_type = "openai"
 auth_type = "api_key"
 api_key = "<your-zai-api-key>"
 base_url = "https://open.bigmodel.cn/api/paas/v4"
+models = ["glm-4.6", "glm-4.5-air"]
 enabled = true
 
 # Example: OpenRouter provider
@@ -268,6 +270,7 @@ provider_type = "openrouter"
 auth_type = "api_key"
 api_key = "<your-openrouter-api-key>"
 # base_url defaults to https://openrouter.ai/api/v1
+models = ["anthropic/claude-sonnet-4-5", "openai/gpt-4o"]
 enabled = true
 
 # Example: OAuth provider (Claude Pro/Max — free)
