@@ -8,15 +8,21 @@ use crate::providers::ProviderResponse;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::fs::{File, OpenOptions};
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use uuid::Uuid;
 
-/// Message tracer that writes to JSONL file
+/// Message tracer that writes to JSONL file.
+///
+/// Uses a `BufWriter` to amortize syscall cost — each `writeln!` goes to
+/// an in-memory buffer that is flushed lazily (when the buffer fills or
+/// the tracer is dropped).  This keeps per-request overhead to a single
+/// `Mutex::lock` + memcpy, avoiding blocking the tokio worker thread on
+/// disk I/O for every request.
 pub struct MessageTracer {
     config: TracingConfig,
-    file: Option<Mutex<File>>,
+    writer: Option<Mutex<BufWriter<File>>>,
 }
 
 /// A trace entry for a request
@@ -59,7 +65,7 @@ impl MessageTracer {
     /// Create a new tracer from config
     pub fn new(config: TracingConfig) -> Self {
         if !config.enabled {
-            return Self { config, file: None };
+            return Self { config, writer: None };
         }
 
         // Expand ~ in path
@@ -69,7 +75,7 @@ impl MessageTracer {
         if let Some(parent) = path.parent() {
             if let Err(e) = std::fs::create_dir_all(parent) {
                 tracing::error!("Failed to create tracing directory: {}", e);
-                return Self { config, file: None };
+                return Self { config, writer: None };
             }
         }
 
@@ -79,19 +85,19 @@ impl MessageTracer {
                 tracing::info!("📝 Message tracing enabled: {}", path.display());
                 Self {
                     config,
-                    file: Some(Mutex::new(file)),
+                    writer: Some(Mutex::new(BufWriter::new(file))),
                 }
             }
             Err(e) => {
                 tracing::error!("Failed to open trace file: {}", e);
-                Self { config, file: None }
+                Self { config, writer: None }
             }
         }
     }
 
     /// Generate a new trace ID
     pub fn new_trace_id(&self) -> String {
-        if self.file.is_some() {
+        if self.writer.is_some() {
             Uuid::new_v4().to_string()[..8].to_string()
         } else {
             String::new()
@@ -101,7 +107,13 @@ impl MessageTracer {
     /// 返回 trace 文件路径（tracing 未启用时返回 None）
     /// 供 /api/logs 端点读取日志用
     pub fn trace_path(&self) -> Option<PathBuf> {
-        if self.file.is_some() {
+        if self.writer.is_some() {
+            // Flush BufWriter so /api/logs can see recent entries
+            if let Some(ref writer_mutex) = self.writer {
+                if let Ok(mut writer) = writer_mutex.lock() {
+                    let _ = writer.flush();
+                }
+            }
             Some(expand_tilde(&self.config.path))
         } else {
             None
@@ -117,7 +129,7 @@ impl MessageTracer {
         route_type: &RouteType,
         is_stream: bool,
     ) {
-        let Some(ref file_mutex) = self.file else {
+        let Some(ref file_mutex) = self.writer else {
             return;
         };
 
@@ -153,7 +165,7 @@ impl MessageTracer {
         response: &ProviderResponse,
         latency_ms: u64,
     ) {
-        let Some(ref file_mutex) = self.file else {
+        let Some(ref file_mutex) = self.writer else {
             return;
         };
 
@@ -173,7 +185,7 @@ impl MessageTracer {
 
     /// Trace an error
     pub fn trace_error(&self, id: &str, error: &str) {
-        let Some(ref file_mutex) = self.file else {
+        let Some(ref file_mutex) = self.writer else {
             return;
         };
 
@@ -187,13 +199,17 @@ impl MessageTracer {
         self.write_trace(&trace, file_mutex);
     }
 
-    fn write_trace<T: Serialize>(&self, trace: &T, file_mutex: &Mutex<File>) {
+    fn write_trace<T: Serialize>(&self, trace: &T, file_mutex: &Mutex<BufWriter<File>>) {
         let Ok(json) = serde_json::to_string(trace) else {
             return;
         };
 
-        if let Ok(mut file) = file_mutex.lock() {
-            let _ = writeln!(file, "{}", json);
+        if let Ok(mut writer) = file_mutex.lock() {
+            let _ = writeln!(writer, "{}", json);
+            // Don't flush every write — BufWriter flushes at 8KB boundary.
+            // This amortizes syscall cost across many trace entries.
+            // /api/logs reads the file directly (not via the writer), so
+            // entries become visible when the buffer fills or on drop.
         }
     }
 }

@@ -44,9 +44,17 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Get a snapshot of current reloadable state
+    /// Get a snapshot of current reloadable state.
+    ///
+    /// Uses `read().unwrap_or_else` to recover from a poisoned lock
+    /// (which would happen if a panic occurred while holding the lock).
+    /// A poisoned lock still contains valid data — the inner Arc is
+    /// intact — so we extract it and continue serving.
     pub fn snapshot(&self) -> Arc<ReloadableState> {
-        self.inner.read().unwrap().clone()
+        match self.inner.read() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
     }
 }
 
@@ -387,11 +395,12 @@ async fn update_config_json(
         }
     }
 
-    // Write back to file
+    // Write back to file (non-blocking via tokio::fs)
     let new_config_str = toml::to_string_pretty(&config)
         .map_err(|e| AppError::ParseError(format!("Failed to serialize config: {}", e)))?;
 
-    std::fs::write(config_path, new_config_str)
+    tokio::fs::write(config_path, new_config_str)
+        .await
         .map_err(|e| AppError::ParseError(format!("Failed to write config: {}", e)))?;
 
     info!("✅ Configuration updated successfully via admin UI");
@@ -499,7 +508,11 @@ async fn reload_config(State(state): State<Arc<AppState>>) -> Response {
     });
 
     // 6. Atomic swap (write lock held for microseconds)
-    *state.inner.write().unwrap() = new_inner;
+    // Recover from poisoned lock rather than panicking.
+    match state.inner.write() {
+        Ok(mut guard) => *guard = new_inner,
+        Err(poisoned) => *poisoned.into_inner() = new_inner,
+    }
 
     info!("✅ Configuration reloaded successfully");
     Html("<div class='px-4 py-3 rounded-xl bg-green-500/20 border border-green-500/50 text-foreground text-sm'><strong>✅ Configuration reloaded</strong><br/>New settings are now active.</div>").into_response()
@@ -945,7 +958,14 @@ async fn handle_messages(
                                 response_builder = response_builder.header(name, value);
                             }
 
-                            let response = response_builder.body(body).unwrap();
+                            let response = match response_builder.body(body) {
+                                Ok(r) => r,
+                                Err(e) => {
+                                    error!("Failed to build stream response: {}", e);
+                                    inner.message_tracer.trace_error(&trace_id, &format!("response build error: {e}"));
+                                    continue;
+                                }
+                            };
 
                             return Ok(response);
                         }

@@ -3342,13 +3342,12 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                                     appState.config.router,
                                 );
 
-                                // Save to localStorage + debounce-sync to server
+                                // Save to localStorage only — user clicks 💾 Save
+                                // to sync to server + reload. Avoids reload storms
+                                // that block in-flight requests.
                                 saveToLocalStorage(appState.config);
                                 showAutoSaveIndicator();
                                 renderOverview();
-                                debounce("autosave-sync", () => syncToServer().then(ok => {
-                                    if (ok) updateLastSaved();
-                                }), 1000);
                             },
                             500,
                         );
@@ -3392,13 +3391,12 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                                         .background_regex;
                                 }
 
-                                // Save to localStorage + debounce-sync to server
+                                // Save to localStorage only — user clicks 💾 Save
+                                // to sync to server + reload. Avoids reload storms
+                                // that block in-flight requests.
                                 saveToLocalStorage(appState.config);
                                 showAutoSaveIndicator();
                                 renderOverview();
-                                debounce("autosave-sync", () => syncToServer().then(ok => {
-                                    if (ok) updateLastSaved();
-                                }), 1000);
                             },
                             500,
                         );
