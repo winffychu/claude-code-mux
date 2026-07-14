@@ -1,8 +1,9 @@
 # P5: Web 前端重构 + 长上下文路由 + 日志查看 + i18n
 
-> 状态：P5.4 已实施（✅），P5.2 已实施（✅），P5.3 i18n 已实施（✅：后端路由+152 词条+56 处 data-i18n+GHA 全绿+真机路由 4/4 验证），P5.1 待实施
+> 状态：全部已实施 ✅。P5.1 长上下文路由 ✅，P5.2 SSE 日志流 ✅，P5.3 i18n（173 keys × 2 语言）✅，P5.4 日志查看器 ✅。性能/稳定性审计+修复 ✅（BufWriter, poison recovery, spawn_blocking, cached regex, autoSave 回退）。Docker 镜像 GHA 自动构建 ✅。
 > 来源：用户增加 P1 级别需求（4 项）
 > 创建：2026-07-10
+> 最终更新：2026-07-14
 > 依赖：P0.2 Token 阈值路由（已实施，`estimate_token_count` tiktoken BPE 基础设施可复用）
 
 ---

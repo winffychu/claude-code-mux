@@ -126,8 +126,8 @@ pattern = "(?i)commit.*changes"
 # Model to route to when pattern matches. Can reference capture groups.
 model = "minimax-m2"
 
-# Optional description for human readability (not parsed by CCM).
-description = "Route git commit tasks to the fast model"
+# Optional comment for human readability (not parsed by CCM; ignored at runtime).
+# description = "Route git commit tasks to the fast model"
 
 # Strip the matched phrase from the prompt before forwarding.
 # Default: false.

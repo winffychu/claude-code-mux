@@ -72,7 +72,9 @@ This document describes the `/v1/chat/completions` endpoint which provides limit
 | `logprobs` | Not supported | - |
 | `n` | Not supported | Only single completion returned |
 | `presence_penalty` | Not supported | - |
-| `frequency_penalty` | Not supported | - |
+| `frequency_penalty` | Not supported | Silently ignored (not deserialized) |
+
+> **Note**: Unsupported parameters are silently dropped during deserialization — they do not cause an error, but have no effect. Only `stream: true` produces an explicit error.
 
 ## Finish Reason Mapping
 
