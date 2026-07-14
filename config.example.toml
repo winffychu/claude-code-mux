@@ -64,8 +64,8 @@ omit_system_prompt = true
 # =============================================================================
 # Controls how incoming requests are routed to models.
 # Routing priority order:
-#   auto-map  →  websearch  →  background  →  subagent  →  prompt_rules
-#            →  think  →  router.rules  →  long_context  →  default
+#   auto-map  →  websearch  →  background  →  subagent  →  router.rules
+#            →  prompt_rules  →  think  →  long_context  →  default
 [router]
 
 # Default model used when no routing condition matches.

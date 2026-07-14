@@ -64,7 +64,7 @@ This fork adds several significant improvements over the upstream project:
 - 🔄 **Provider Failover** - Automatic fallback to backup providers with priority-based routing
 - 🌊 **Streaming Support** - Full Server-Sent Events (SSE) streaming for real-time responses
 - 🌐 **Multi-Provider Support** - 18+ providers including OpenAI, Anthropic, Google Gemini/Vertex AI, Groq, ZenMux, etc.
-- ⚡️ **High Performance** - ~5MB RAM, <1ms routing overhead (Rust powered)
+- ⚡️ **High Performance** - ~6MB RAM, <1ms routing overhead (Rust powered)
 - 🎯 **Unified API** - Full Anthropic Messages API compatibility
 
 ### 🚀 Advanced Features
@@ -205,7 +205,30 @@ This will download, compile, and install the `ccm` binary to `~/.cargo/bin/`.
 ccm --version
 ```
 
-### Option 3: Build from Source
+### Option 3: Docker (Pre-built Image)
+
+```bash
+# Pull the latest image from GitHub Container Registry
+docker pull ghcr.io/winffychu/claude-code-mux:latest
+
+# Run on default port 13456
+docker run -d \
+  --name ccm \
+  -p 13456:13456 \
+  -v ~/.claude-code-mux:/home/nonroot/.claude-code-mux \
+  ghcr.io/winffychu/claude-code-mux:latest
+
+# Or with a custom config
+docker run -d \
+  --name ccm \
+  -p 13456:13456 \
+  -v /path/to/config.toml:/home/nonroot/.claude-code-mux/config.toml \
+  ghcr.io/winffychu/claude-code-mux:latest
+```
+
+> **Note**: The image is distroless (static-musl binary). Config and trace files persist via the `/home/nonroot/.claude-code-mux` volume mount.
+
+### Option 4: Build from Source
 
 #### Prerequisites
 - Rust 1.70+ (install from [rustup.rs](https://rustup.rs/))
@@ -265,7 +288,7 @@ You'll see a modern admin interface with these tabs:
 - **Overview** - System status and configuration summary
 - **Providers** - Manage API providers
 - **Models** - Configure model mappings and fallbacks
-- **Router** - Set up routing rules (auto-saves on change!)
+- **Router** - Set up routing rules (auto-saves to localStorage)
 - **Test** - Test your configuration with live requests
 
 ### 3. Configure Claude Code
@@ -391,7 +414,7 @@ Navigate to **Models** tab → Click **"Add Model"**
 
 Navigate to **Router** tab
 
-Configure routing rules (auto-saves on change!):
+Configure routing rules (auto-saves to localStorage; click 💾 Save to persist to disk and apply):
 - **Default Model**: `minimax-m2` (general tasks - ultra-fast, 8% of Claude cost)
 - **Think Model**: `kimi-k2` (plan mode with reasoning - 256K context)
 - **Background Model**: `glm-4.5-air` (simple background tasks)
@@ -415,7 +438,7 @@ Navigate to **Settings** tab for centralized regex management:
 
 Click **"💾 Save"** to save configuration and hot-reload.
 
-> **Note**: Router configuration auto-saves to localStorage on change, but you need to click "Save" to persist to disk and apply changes.
+> **Note**: Router configuration auto-saves to localStorage on change. Click 💾 **Save** to persist to disk, hot-reload the server, and apply changes.
 
 ### Step 5: Test Your Setup
 
@@ -427,7 +450,7 @@ Navigate to **Test** tab:
 
 ## Routing Logic
 
-**Flow**: Auto-map (transform) → WebSearch > Background > Subagent > Prompt Rules > Think > Router Rules > Long Context > Default
+**Flow**: Auto-map (transform) → WebSearch > Background > Subagent > Router Rules > Prompt Rules > Think > Long Context > Default
 
 ### 0. Auto-mapping (Model Name Transformation)
 - **Trigger**: Model name matches `auto_map_regex` pattern
@@ -457,21 +480,7 @@ Navigate to **Test** tab:
 - **Example**: AI agent specifying model for sub-task
 - **Routes to**: Specified model (tag auto-removed)
 
-### 4. Prompt Rules
-- **Trigger**: Last user message matches a configured prompt rule regex
-- **Example**: Message containing "[fast]" or "commit changes"
-- **Routes to**: Model specified in the matching rule
-- **Configuration**: Set in Router config with `prompt_rules` array
-- **Note**: Prompt rules are checked AFTER background detection to ensure background tasks use cheaper models
-
-### 5. Think Mode
-- **Trigger**: Request has `thinking` field with `type: "enabled"`
-- **Example**: Claude Code Plan Mode (`/plan`)
-- **Routes to**: `think` model (e.g., Kimi K2 Thinking, Claude Opus)
-- **Note**: The `thinking` parameter is passed through to Anthropic providers, enabling extended reasoning. OpenAI-compatible providers don't support this parameter.
-- **GLM Models**: The proxy extracts and displays GLM's `reasoning` output but does not preserve `reasoning_details` for conversation continuation.
-
-### 5.5. Router Rules (Advanced Rewrites)
+### 4. Router Rules (Advanced Rewrites)
 - **Trigger**: Request matches a configured `[[router.rules]]` entry
 - **Two rule types**:
   - `model-prefix` — matches when the model name starts with a given `prefix`
@@ -480,13 +489,27 @@ Navigate to **Test** tab:
 - **Token threshold**: Rules can optionally require `token_count >= threshold` before triggering
 - **Configuration**: Set in Router config with `rules` array (see `config.example.toml`)
 
-### 5.6. Long Context Routing
+### 5. Prompt Rules
+- **Trigger**: Last user message matches a configured prompt rule regex
+- **Example**: Message containing "[fast]" or "commit changes"
+- **Routes to**: Model specified in the matching rule
+- **Configuration**: Set in Router config with `prompt_rules` array
+- **Note**: Prompt rules are checked AFTER background detection to ensure background tasks use cheaper models
+
+### 6. Think Mode
+- **Trigger**: Request has `thinking` field with `type: "enabled"`
+- **Example**: Claude Code Plan Mode (`/plan`)
+- **Routes to**: `think` model (e.g., Kimi K2 Thinking, Claude Opus)
+- **Note**: The `thinking` parameter is passed through to Anthropic providers, enabling extended reasoning. OpenAI-compatible providers don't support this parameter.
+- **GLM Models**: The proxy extracts and displays GLM's `reasoning` output but does not preserve `reasoning_details` for conversation continuation.
+
+### 7. Long Context Routing
 - **Trigger**: Request token count ≥ `long_context_threshold` (default: 100,000 tokens)
 - **Routes to**: `long_context` model (e.g., a 256K-context model like Kimi K2)
 - **Use case**: Route large-context requests to a model with a bigger window while keeping smaller requests on a cheaper/default model
 - **Configuration**: Set `long_context` and `long_context_threshold` in the `[router]` section
 
-### 6. Default (Fallback)
+### 8. Default (Fallback)
 - **Trigger**: No routing conditions matched
 - **Routes to**: Transformed model name (if auto-mapped) or original model name
 
@@ -1188,11 +1211,15 @@ All three provide **FREE unlimited API access** to subscribers!
 <summary><b>Why is my routing not working as expected?</b></summary>
 
 Check the routing order:
-1. **WebSearch** (highest priority) - if request has `web_search` tool
-2. **Subagent** - if system prompt contains `<CCM-SUBAGENT-MODEL>` tag
-3. **Think Mode** - if request has `thinking` field
-4. **Background** - if ORIGINAL model name matches background regex
-5. **Default** - fallback
+1. **Auto-map** - transform model name if it matches `auto_map_regex`
+2. **WebSearch** - if request has `web_search` tool
+3. **Background** - if ORIGINAL model name matches `background_regex`
+4. **Subagent** - if system prompt contains `<CCM-SUBAGENT-MODEL>` tag
+5. **Router Rules** - if request matches a `[[router.rules]]` entry
+6. **Prompt Rules** - if last user message matches a `prompt_rules` regex
+7. **Think Mode** - if request has `thinking` field
+8. **Long Context** - if token count ≥ `long_context_threshold`
+9. **Default** - fallback
 
 Enable debug logging with `RUST_LOG=debug ccm start` to see routing decisions.
 </details>
