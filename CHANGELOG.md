@@ -5,6 +5,43 @@ All notable changes to Claude Code Mux will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.3-eli.1] - 2026-07-14
+
+### Added
+- Fork-specific: OpenAI-compatible `/v1/chat/completions` tool/function calling support
+- OpenAI-compatible `/v1/models` endpoint (aggregates provider models, BTreeSet dedup)
+- Message tracing with BufWriter (buffered I/O, lazy flush on /api/logs)
+- Live logs viewer: `/api/logs` (paginated) and `/api/logs/stream` (real-time SSE)
+- Admin UI i18n (zh-CN + en, 173 keys each)
+- Admin UI dark theme (system prefers-color-scheme + manual toggle)
+- Admin UI URL-based tab navigation (`?tab=router`, `?tab=logs`, etc.)
+- Router rules: `[[router.rules]]` with model-prefix and condition type, request rewrites
+- Long context routing (`long_context` + `long_context_threshold`)
+- Subagent model routing via `<CCM-SUBAGENT-MODEL>` tags
+- `config.example.toml` with fully commented all-options example
+- Docker image: `ghcr.io/winffychu/claude-code-mux:latest` (distroless, musl static)
+- `write_routing_info` moved to `tokio::task::spawn_blocking` (non-blocking)
+- Cached regex for subagent model extraction (`Lazy<Regex>`)
+
+### Changed
+- Router autoSave: localStorage only; 💾 Save button syncs to server + hot-reload
+- Routing order: auto-map → websearch → background → subagent → router.rules → prompt_rules → think → long_context → default
+- `update_config_json`: `tokio::fs::write` (async, non-blocking) instead of `std::fs::write`
+- RwLock poison recovery: `unwrap_or_else(|e| e.into_inner())` on all lock sites
+- `openai.rs:769`: `.expect()` → `match` returning error response (no panic on empty choices)
+- Stream state mutex: poison recovery instead of `.unwrap()` cascade
+- `SystemTime::now().duration_since()`: `.unwrap_or(0)` (NTP clock rollback safe)
+- `response_builder.body()`: `.unwrap()` → `match` with error fallback
+
+### Fixed
+- Performance: tracing sync I/O + std::Mutex on every request → BufWriter + lazy flush
+- Stability: RwLock unwrap → poison propagation → server permanent crash on single panic
+- Stability: `.expect()` on empty OpenAI choices → panic → connection abort
+- Stability: autoSave syncToServer storm → POST entire config on every keystroke → reload contention
+- localStorage guard: try/catch on all access points (prevents total JS crash)
+- Logs tab i18n: all strings now use translation keys
+- Dark theme: CSS variables + `html.dark` class (robust against Tailwind overrides)
+
 ## [0.6.0] - 2025-11-19
 
 ### Added
@@ -122,6 +159,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TOML-based configuration
 - Token counting endpoint (`/v1/messages/count_tokens`)
 
+[0.6.3-eli.1]: https://github.com/winffychu/claude-code-mux/commits/main
 [0.6.0]: https://github.com/9j/claude-code-mux/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/9j/claude-code-mux/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/9j/claude-code-mux/compare/v0.4.2...v0.4.3
