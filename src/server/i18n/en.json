@@ -162,5 +162,14 @@
   "toast.tracing_enabling": "Enabling tracing...",
   "toast.tracing_disabling": "Disabling tracing...",
   "heading.request_logs": "Request Logs",
-  "logs.description": "Recent request traces from trace.jsonl (newest first)"
+  "logs.description": "Recent request traces from trace.jsonl (newest first)",
+  "logs.tracing_off_warning": "⚠️ Tracing is not enabled. Enable it in Settings ([tracing] enabled = true) to start collecting logs.",
+  "logs.filter_all": "All directions",
+  "logs.filter_req": "Requests (req)",
+  "logs.filter_res": "Responses (res)",
+  "logs.filter_err": "Errors (err)",
+  "logs.filter_id_placeholder": "Filter by trace ID",
+  "logs.live_sse": "Live (SSE)",
+  "logs.refresh": "Refresh",
+  "logs.no_entries": "No log entries."
 }

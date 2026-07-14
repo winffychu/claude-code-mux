@@ -1522,7 +1522,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                     </p>
 
                     <div id="logs-tracing-off" class="hidden card mb-6">
-                        <p class="text-gray-600">
+                        <p class="text-gray-600" data-i18n="logs.tracing_off_warning">
                             ⚠️ Tracing is not enabled. Enable it in Settings
                             (<code>[tracing] enabled = true</code>) to start
                             collecting logs.
@@ -1531,16 +1531,16 @@ strip_match = false             # strip matched phrase (default: false)</pre>
 
                     <div id="logs-toolbar" class="flex items-center gap-4 mb-6">
                         <select id="logs-filter-dir" class="input-field max-w-xs" onchange="loadLogs()">
-                            <option value="">All directions</option>
-                            <option value="req">Requests (req)</option>
-                            <option value="res">Responses (res)</option>
-                            <option value="err">Errors (err)</option>
+                            <option value="" data-i18n="logs.filter_all">All directions</option>
+                            <option value="req" data-i18n="logs.filter_req">Requests (req)</option>
+                            <option value="res" data-i18n="logs.filter_res">Responses (res)</option>
+                            <option value="err" data-i18n="logs.filter_err">Errors (err)</option>
                         </select>
-                        <input id="logs-filter-id" type="text" placeholder="Filter by trace ID" class="input-field max-w-xs" oninput="loadLogs()" />
+                        <input id="logs-filter-id" type="text" data-i18n-ph="logs.filter_id_placeholder" placeholder="Filter by trace ID" class="input-field max-w-xs" oninput="loadLogs()" />
                         <label class="flex items-center gap-2 text-sm text-gray-600">
-                            <input id="logs-live" type="checkbox" onchange="toggleLogsStream()" disabled /> Live (SSE)
+                            <input id="logs-live" type="checkbox" onchange="toggleLogsStream()" disabled /> <span data-i18n="logs.live_sse">Live (SSE)</span>
                         </label>
-                        <button onclick="loadLogs()" class="btn-primary text-sm px-4 py-2">Refresh</button>
+                        <button onclick="loadLogs()" class="btn-primary text-sm px-4 py-2" data-i18n="logs.refresh">Refresh</button>
                         <span id="logs-count" class="text-sm text-gray-500 ml-auto"></span>
                     </div>
 
@@ -1804,7 +1804,9 @@ strip_match = false             # strip matched phrase (default: false)</pre>
 
         <script>
             // ===== P5.3 i18n 基础设施 =====
-            let ccmLocale = localStorage.getItem('ccmLocale') || 'zh-CN';
+            let ccmLocale;
+            try { ccmLocale = localStorage.getItem('ccmLocale') || 'zh-CN'; }
+            catch (e) { ccmLocale = 'zh-CN'; }
             const ccmMessages = {};
 
             async function loadI18n(loc) {
@@ -1859,7 +1861,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                 } else {
                     document.documentElement.classList.remove("dark");
                 }
-                localStorage.setItem("ccmTheme", dark ? "dark" : "light");
+                try { localStorage.setItem("ccmTheme", dark ? "dark" : "light"); } catch (e) {}
                 const icon = document.getElementById("theme-icon");
                 const label = document.getElementById("theme-label");
                 if (icon) icon.textContent = dark ? "☀️" : "🌙";
@@ -1873,7 +1875,8 @@ strip_match = false             # strip matched phrase (default: false)</pre>
 
             // Init theme from localStorage or prefers-color-scheme
             (function initTheme() {
-                const saved = localStorage.getItem("ccmTheme");
+                let saved = null;
+                try { saved = localStorage.getItem("ccmTheme"); } catch (e) {}
                 if (saved) {
                     applyTheme(saved === "dark");
                 } else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
@@ -2070,7 +2073,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                     count.textContent = `${entries.length} / ${data.total} entries`;
                     if (entries.length === 0) {
                         list.innerHTML =
-                            '<p class="text-gray-500 italic">No log entries.</p>';
+                            '<p class="text-gray-500 italic">' + t("logs.no_entries") + '</p>';
                         return;
                     }
                     list.innerHTML = entries.map(logEntryHtml).join("");
@@ -3339,10 +3342,13 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                                     appState.config.router,
                                 );
 
-                                // Save to localStorage only
+                                // Save to localStorage + debounce-sync to server
                                 saveToLocalStorage(appState.config);
                                 showAutoSaveIndicator();
                                 renderOverview();
+                                debounce("autosave-sync", () => syncToServer().then(ok => {
+                                    if (ok) updateLastSaved();
+                                }), 1000);
                             },
                             500,
                         );
@@ -3386,10 +3392,13 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                                         .background_regex;
                                 }
 
-                                // Save to localStorage only
+                                // Save to localStorage + debounce-sync to server
                                 saveToLocalStorage(appState.config);
                                 showAutoSaveIndicator();
                                 renderOverview();
+                                debounce("autosave-sync", () => syncToServer().then(ok => {
+                                    if (ok) updateLastSaved();
+                                }), 1000);
                             },
                             500,
                         );
