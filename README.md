@@ -951,7 +951,7 @@ CCM exposes the following HTTP endpoints:
 |----------|--------|-------------|
 | `/v1/messages` | POST | Main Anthropic Messages API endpoint (proxy entry point) |
 | `/v1/messages/count_tokens` | POST | Anthropic token counting endpoint |
-| `/v1/chat/completions` | POST | OpenAI-compatible chat completions (non-streaming only) |
+| `/v1/chat/completions` | POST | OpenAI-compatible chat completions (non-streaming; supports tool calling) |
 | `/v1/models` | GET | List available models (OpenAI-compatible response) |
 | `/health` | GET | Health check endpoint |
 | `/api/config/json` | GET | Get current configuration as JSON |
@@ -1117,6 +1117,7 @@ ccm install-statusline
 - ✅ **Auto-mapping** with regex patterns
 - ✅ **Provider failover** with priority-based routing
 - ✅ Auto-strip incompatible parameters for OpenAI models
+- ✅ **OpenAI tool calling** on `/v1/chat/completions` (non-streaming)
 
 ## Troubleshooting
 

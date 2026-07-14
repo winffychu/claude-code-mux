@@ -16,10 +16,12 @@ This document describes the `/v1/chat/completions` endpoint which provides limit
 - Basic parameters: temperature, top_p, stop, max_tokens
 
 **Not Supported:**
-- Streaming (`stream: true` returns an error)
+- Streaming (`stream: true` returns an error; use `/v1/messages` for streaming)
 - Cache tokens in usage statistics
 
 > **Updated 2026-07-10**: Tool/function calling is now supported (non-streaming). OpenAI tool definitions are converted to Anthropic Tool format, assistant tool_calls in history are converted to ToolUse blocks, and tool role messages are converted to ToolResult blocks. Response tool_use blocks are converted back to OpenAI tool_calls with `finish_reason: "tool_calls"`.
+
+> **Supported parameters**: `model`, `messages`, `max_tokens`, `temperature`, `top_p`, `stop`, `tools`, `tool_choice`, `stream` (returns error).
 
 ## Request Format
 
@@ -64,9 +66,7 @@ This document describes the `/v1/chat/completions` endpoint which provides limit
 
 | Parameter | Status | Notes |
 |-----------|--------|-------|
-| `stream` | Not supported | Returns error; use `/v1/messages` instead |
-| `tools` | Not supported | Use `/v1/messages` with OpenAI backends |
-| `tool_choice` | Not supported | Use `/v1/messages` with OpenAI backends |
+| `stream` | Not supported | Returns error; use `/v1/messages` for streaming |
 | `response_format` | Not supported | JSON mode not available |
 | `seed` | Not supported | Reproducibility not guaranteed |
 | `logprobs` | Not supported | - |
