@@ -1540,7 +1540,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                             <option value="res" data-i18n="logs.dir_res">Responses (res)</option>
                             <option value="err" data-i18n="logs.dir_err">Errors (err)</option>
                         </select>
-                        <input id="logs-filter-id" type="text" data-i18n-placeholder="placeholder.filter_trace_id" data-i18n-placeholder="logs.filter_id_placeholder" placeholder="Filter by trace ID" class="input-field max-w-xs" oninput="loadLogs()" />
+                        <input id="logs-filter-id" type="text" data-i18n-placeholder="logs.filter_id_placeholder" placeholder="Filter by trace ID" class="input-field max-w-xs" oninput="loadLogs()" />
                         <label class="flex items-center gap-2 text-sm text-gray-600">
                             <input id="logs-live" type="checkbox" onchange="toggleLogsStream()" disabled /> <span data-i18n="logs.live_sse">Live (SSE)</span>
                         </label>
@@ -1836,6 +1836,10 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                 });
                 document.querySelectorAll('[data-i18n-ph]').forEach(el => {
                     const k = el.getAttribute('data-i18n-ph');
+                    if (k) el.placeholder = t(k);
+                });
+                document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+                    const k = el.getAttribute('data-i18n-placeholder');
                     if (k) el.placeholder = t(k);
                 });
                 document.querySelectorAll('[data-i18n-title]').forEach(el => {
