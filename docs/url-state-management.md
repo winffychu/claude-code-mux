@@ -25,7 +25,7 @@ https://alfy.blog/2025/10/31/your-url-is-your-state.html
 ?tab=<tab-name>&view=<view-name>
 ```
 
-- `tab`: Currently active tab (overview, models, providers, router, settings)
+- `tab`: Currently active tab (overview, providers, models, router, test, logs, settings)
 - `view`: View state within the tab (add, edit, etc.; defaults to list view if absent)
 
 #### Examples
@@ -45,6 +45,15 @@ http://localhost:13456/admin?tab=models
 
 # Model add view
 http://localhost:13456/admin?tab=models&view=add
+
+# Router configuration
+http://localhost:13456/admin?tab=router
+
+# Request logs viewer
+http://localhost:13456/admin?tab=logs
+
+# Live testing
+http://localhost:13456/admin?tab=test
 ```
 
 ### Core Functions

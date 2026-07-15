@@ -200,51 +200,30 @@ document.getElementById('add-model-form').addEventListener('submit', async funct
 });
 ```
 
-### Save All
+### Save & Hot-Reload
 
 ```javascript
-async function saveAllConfig() {
-    console.log('Saving all configuration...');
-
+async function saveConfig() {
     try {
-        // Sync localStorage → server
+        // 1. Sync localStorage → server (POST /api/config/json)
         const success = await syncToServer();
-
         if (success) {
+            // 2. Hot-reload (POST /api/reload) — no restart needed
+            await fetch('/api/reload', { method: 'POST' });
             updateLastSaved();
-            notifySuccess('All settings saved');
+            notifySuccess('Configuration saved');
             renderOverview();
         } else {
             notifyError('Save failed');
         }
     } catch (error) {
-        console.error('Failed to save all config:', error);
+        console.error('Failed to save config:', error);
         notifyError('Error during save');
     }
 }
 ```
 
-### Save & Restart
-
-```javascript
-async function saveAndRestart() {
-    if (!confirm('Save settings and restart server?')) return;
-
-    try {
-        // 1. Save first
-        await saveAllConfig();
-
-        // 2. Wait briefly then restart
-        setTimeout(async () => {
-            await fetch('/api/restart', { method: 'POST' });
-            notifySuccess('Server restarted');
-        }, 500);
-    } catch (error) {
-        console.error('Failed to save and restart:', error);
-        notifyError('Failed to save and restart');
-    }
-}
-```
+> **Note**: The autoSave feature (in `setupRouterAutoSave` / `setupSettingsAutoSave`) only saves to `localStorage` — it does **not** POST to the server. Users click 💾 **Save** to persist to disk and hot-reload. This avoids reload storms that would block in-flight requests.
 
 ## Data Flow
 
@@ -289,28 +268,29 @@ renderProvidersList() (reads from localStorage)
 
 ### Save Button Click
 ```
-User clicks "Save All"
+User clicks 💾 Save
     ↓
 syncToServer() called
     ↓
 POST /api/config/json (appState.config)
     ↓
-Server saves to TOML file
+POST /api/reload (hot-reload, no restart)
     ↓
-notifySuccess('Saved')
+updateLastSaved(), notifySuccess('Configuration saved')
+    ↓
+renderOverview()
 ```
 
-### Save & Restart Click
+### Auto-Save (Router/Settings forms)
 ```
-User clicks "Save & Restart"
+User edits a router field
     ↓
-saveAllConfig() → syncToServer()
+debounce('router', 500ms)
     ↓
-POST /api/config/json
+saveToLocalStorage(appState.config)  ← localStorage ONLY
     ↓
-POST /api/restart
-    ↓
-Server restarts → loads new config
+showAutoSaveIndicator('✓ Auto-saved')
+    (NO server POST — user clicks Save to sync)
 ```
 
 ## Benefits

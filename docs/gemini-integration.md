@@ -170,11 +170,10 @@ enabled = true
 
 ## Vertex AI Provider (`provider_type: "vertex-ai"`)
 
-Vertex AI is Google Cloud's unified AI platform that provides access to multiple model families:
-- **Gemini models** (2.5 Flash, 2.0 Flash, 1.5 Pro, etc.)
-- **Claude models** (3.7 Sonnet, 3.5 Haiku, etc.)
-- **Llama models** (Llama 4, Llama 3.x)
-- **Other models** via Model Garden
+Vertex AI is Google Cloud's unified AI platform that provides access to model families:
+- **Gemini models** (2.5 Flash, 2.0 Flash, 1.5 Pro, etc.) — fully supported
+
+> **Note**: Vertex AI can also serve Claude and Llama models via Model Garden, but the current implementation only constructs `publishers/google/models/{model}` endpoints. Claude/Llama support via Vertex AI is not yet available — the provider would need to map model names to publisher paths (`publishers/anthropic/models/...`, `publishers/meta/models/...`).
 
 ### Authentication
 
@@ -548,7 +547,7 @@ For `provider_type: "vertex-ai"`, use full model paths with `publishers/{publish
 - [x] **Code Assist API integration** (OAuth)
 - [x] **Public Gemini API integration** (API Key)
 - [x] **JSON Schema metadata cleaning for tools**
-- [ ] Streaming support
+- [x] Streaming support (SSE via `:streamGenerateContent?alt=sse`)
 - [x] Tool/Function calling support
 - [x] Image support (inline_data)
 - [x] Error handling and mapping
