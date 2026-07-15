@@ -121,14 +121,18 @@ Tokens are stored in JSON format at `~/.claude-code-mux/oauth_tokens.json`:
 
 File permissions are automatically set to `0600` (owner read/write only) for security.
 
-## API Endpoints (Future)
+## API Endpoints
 
-The following API endpoints will be added to the admin server:
+The following API endpoints are implemented in the admin server:
 
-- `POST /api/oauth/authorize` - Get authorization URL
-- `POST /api/oauth/exchange` - Exchange authorization code for tokens
-- `GET /api/oauth/tokens` - List all OAuth providers
-- `DELETE /api/oauth/tokens/:provider` - Remove OAuth token
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/oauth/authorize` | POST | Get authorization URL |
+| `/api/oauth/exchange` | POST | Exchange authorization code for tokens |
+| `/api/oauth/callback` | GET | OAuth callback handler (for popup flow) |
+| `/api/oauth/tokens` | GET | List all stored OAuth tokens |
+| `/api/oauth/tokens/refresh` | POST | Refresh a specific OAuth token |
+| `/api/oauth/tokens/delete` | POST | Delete an OAuth token |
 
 ## Usage Example
 
