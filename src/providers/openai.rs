@@ -1666,7 +1666,11 @@ impl AnthropicProvider for OpenAIProvider {
         // Add stream finalization to ensure proper termination
         // Some providers close streams without sending finish_reason
         let finalized_stream = transformed_stream.chain(futures::stream::once(async move {
-            let state = state_for_cleanup.lock().unwrap();
+            // Recover from poisoned lock rather than panicking in the stream tail
+            let state = match state_for_cleanup.lock() {
+                Ok(s) => s,
+                Err(poisoned) => poisoned.into_inner(),
+            };
             tracing::debug!("🏁 Stream finalization: message_started={}, stream_ended={}",
                 state.message_started, state.stream_ended);
 

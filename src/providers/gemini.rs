@@ -544,11 +544,17 @@ impl AnthropicProvider for GeminiProvider {
             // Build URL
             let url = if self.is_vertex_ai() {
                 // Vertex AI endpoint
+                let project_id = self.project_id.as_ref().ok_or_else(|| {
+                    ProviderError::ConfigError("Vertex AI requires project_id".to_string())
+                })?;
+                let location = self.location.as_ref().ok_or_else(|| {
+                    ProviderError::ConfigError("Vertex AI requires location".to_string())
+                })?;
                 format!(
                     "{}/projects/{}/locations/{}/publishers/google/models/{}:generateContent",
                     self.base_url,
-                    self.project_id.as_ref().unwrap(),
-                    self.location.as_ref().unwrap(),
+                    project_id,
+                    location,
                     model
                 )
             } else if self.api_key.is_some() {
@@ -716,11 +722,17 @@ impl AnthropicProvider for GeminiProvider {
             // Build URL
             let url = if self.is_vertex_ai() {
                 // Vertex AI streaming endpoint
+                let project_id = self.project_id.as_ref().ok_or_else(|| {
+                    ProviderError::ConfigError("Vertex AI requires project_id".to_string())
+                })?;
+                let location = self.location.as_ref().ok_or_else(|| {
+                    ProviderError::ConfigError("Vertex AI requires location".to_string())
+                })?;
                 format!(
                     "{}/projects/{}/locations/{}/publishers/google/models/{}:streamGenerateContent?alt=sse",
                     self.base_url,
-                    self.project_id.as_ref().unwrap(),
-                    self.location.as_ref().unwrap(),
+                    project_id,
+                    location,
                     model
                 )
             } else if self.api_key.is_some() {
