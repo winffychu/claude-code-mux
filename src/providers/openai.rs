@@ -1302,10 +1302,17 @@ impl AnthropicProvider for OpenAIProvider {
             }
 
             // Merge forwarded client headers
+            // OAuth: protect browser fingerprint headers from being overwritten
+            // Non-OAuth (API Key): pass through client User-Agent and other headers
+            let forward_keys: &[&str] = if self.is_oauth() {
+                &["authorization", "content-type", "user-agent", "origin", "referer", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "openai-beta", "chatgpt-account-id", "originator"]
+            } else {
+                &["authorization", "content-type"]
+            };
             let req_builder = crate::headers::merge_forward_headers(
                 req_builder,
                 &request.forward_headers,
-                &["authorization", "content-type", "user-agent", "origin", "referer", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "openai-beta", "chatgpt-account-id", "originator"],
+                forward_keys,
             );
 
             let response = req_builder
@@ -1382,10 +1389,17 @@ impl AnthropicProvider for OpenAIProvider {
             }
 
             // Merge forwarded client headers
+            // OAuth: protect browser fingerprint headers from being overwritten
+            // Non-OAuth (API Key): pass through client User-Agent and other headers
+            let forward_keys: &[&str] = if self.is_oauth() {
+                &["authorization", "content-type", "user-agent", "origin", "referer", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "openai-beta", "chatgpt-account-id", "originator"]
+            } else {
+                &["authorization", "content-type"]
+            };
             let req_builder = crate::headers::merge_forward_headers(
                 req_builder,
                 &request.forward_headers,
-                &["authorization", "content-type", "user-agent", "origin", "referer", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "openai-beta", "chatgpt-account-id", "originator"],
+                forward_keys,
             );
 
             let response = req_builder
@@ -1530,10 +1544,17 @@ impl AnthropicProvider for OpenAIProvider {
         }
 
         // Merge forwarded client headers
+        // OAuth: protect browser fingerprint headers from being overwritten
+        // Non-OAuth (API Key): pass through client User-Agent and other headers
+        let forward_keys: &[&str] = if self.is_oauth() {
+            &["authorization", "content-type", "accept", "user-agent", "origin", "referer", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "openai-beta", "chatgpt-account-id", "originator"]
+        } else {
+            &["authorization", "content-type", "accept"]
+        };
         let req_builder = crate::headers::merge_forward_headers(
             req_builder,
             &request.forward_headers,
-            &["authorization", "content-type", "accept", "user-agent", "origin", "referer", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "openai-beta", "chatgpt-account-id", "originator"],
+            forward_keys,
         );
 
         let response = req_builder

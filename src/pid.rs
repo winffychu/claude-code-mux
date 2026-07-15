@@ -40,11 +40,20 @@ pub fn cleanup_pid() -> io::Result<()> {
     Ok(())
 }
 
-/// Check if a process is running
+/// Check if a process is running.
+///
+/// Returns false for PID 0 (kernel scheduler) and PID 1 (init/container process)
+/// because those are never legitimate CCM instances — a stale PID file containing
+/// 0 or 1 means the previous process died and the PID was reused by the system.
 #[cfg(unix)]
 pub fn is_process_running(pid: u32) -> bool {
     use nix::sys::signal::{kill, Signal};
     use nix::unistd::Pid;
+
+    // PID 0 and 1 are system processes, not CCM
+    if pid <= 1 {
+        return false;
+    }
 
     match kill(Pid::from_raw(pid as i32), Signal::SIGCONT) {
         Ok(_) => true,

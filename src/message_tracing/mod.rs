@@ -206,10 +206,12 @@ impl MessageTracer {
 
         if let Ok(mut writer) = file_mutex.lock() {
             let _ = writeln!(writer, "{}", json);
-            // Don't flush every write — BufWriter flushes at 8KB boundary.
-            // This amortizes syscall cost across many trace entries.
-            // /api/logs reads the file directly (not via the writer), so
-            // entries become visible when the buffer fills or on drop.
+            // Flush after every write so /api/logs can see entries immediately.
+            // Without this, data stays in the BufWriter's 8KB in-memory buffer
+            // and is invisible to read_to_string until the buffer fills or the
+            // tracer is dropped.  The syscall cost is negligible for the trace
+            // write volume (a few entries per request).
+            let _ = writer.flush();
         }
     }
 }

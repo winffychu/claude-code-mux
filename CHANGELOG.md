@@ -46,6 +46,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Logs tab i18n: all strings now use translation keys
 - Dark theme: CSS variables + `html.dark` class (robust against Tailwind overrides)
 - Container startup: PID file moved from `~/.claude-code-mux/ccm.pid` (persistent volume) → `/tmp/ccm.pid` (ephemeral), preventing stale-PID blocking on container restart
+- Container PID 1: `is_process_running()` now returns false for PID ≤ 1 (init/container process), fixing "already running" false positive when stale PID file contains PID 1
+- Header passthrough: OpenAI provider `existing_keys` now conditional on `is_oauth()` — non-OAuth (API key) path no longer blocks client User-Agent and browser fingerprint headers from passing through to upstream
+- Logs visibility: BufWriter now flushes after every trace write (was 8KB lazy flush), ensuring `/api/logs` can read entries immediately without waiting for buffer fill or tracer drop
 
 ## [0.6.0] - 2025-11-19
 

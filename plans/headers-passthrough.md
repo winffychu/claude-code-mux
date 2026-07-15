@@ -156,9 +156,9 @@ let req_builder = crate::headers::merge_forward_headers(
 
 | # | 方法 | 分支 | `.send()` 行号 | existing_keys |
 |---|------|------|------|---------------|
-| 4 | `send_message` | Codex (Responses API) | L1284 | `[...same...]` |
-| 5 | `send_message` | Chat (Completions API) | L1357 | `[...same...]` |
-| 6 | `send_message_stream` | Codex + Chat 共用 | L1498 | `[...same...]` |
+| 4 | `send_message` | Codex (Responses API) | L1284 | OAuth: `[auth, ct, ua, origin, referer, sec-*, openai-beta, chatgpt-account-id, originator]` / Non-OAuth: `[auth, ct]` |
+| 5 | `send_message` | Chat (Completions API) | L1357 | 同上——按 `is_oauth()` 选择 |
+| 6 | `send_message_stream` | Codex + Chat 共用 | L1498 | 同上——按 `is_oauth()` 选择 |
 
 ```rust
 // 在 custom_headers 循环之后、.json(body).send() 之前：
