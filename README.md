@@ -226,7 +226,7 @@ docker run -d \
   ghcr.io/winffychu/claude-code-mux:latest
 ```
 
-> **Note**: The image is distroless (static-musl binary). Config and trace files persist via the `/home/nonroot/.claude-code-mux` volume mount.
+> **Note**: The image is distroless (static-musl binary). Config and trace files persist via the `/home/nonroot/.claude-code-mux` volume mount. The PID file is written to `/tmp/ccm.pid` (ephemeral container filesystem) — it will not persist across restarts, preventing stale-PID startup failures.
 
 ### Option 4: Build from Source
 

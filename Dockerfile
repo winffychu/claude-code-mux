@@ -18,15 +18,13 @@ COPY tests ./tests
 COPY config ./config
 
 RUN cargo build --release --target x86_64-unknown-linux-musl --locked \
-    && cp target/x86_64-unknown-linux-musl/release/ccm /app/ccm \
-    && mkdir -p /home/nonroot/.claude-code-mux
+    && cp target/x86_64-unknown-linux-musl/release/ccm /app/ccm
 
 # =============================================================
 # Stage 2: distroless — 生产推荐
 # =============================================================
 FROM gcr.io/distroless/static-debian12:nonroot AS distroless
 COPY --from=builder /app/ccm /usr/local/bin/ccm
-COPY --from=builder --chown=65532:65532 /home/nonroot /home/nonroot
 ENV HOME=/home/nonroot
 EXPOSE 13456
 ENTRYPOINT ["ccm"]

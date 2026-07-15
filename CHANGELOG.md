@@ -38,9 +38,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stability: RwLock unwrap → poison propagation → server permanent crash on single panic
 - Stability: `.expect()` on empty OpenAI choices → panic → connection abort
 - Stability: autoSave syncToServer storm → POST entire config on every keystroke → reload contention
+- Stability: Gemini Vertex AI `.unwrap()` on missing project_id/location → ok_or_else
+- Stability: OpenAI stream finalizer `.lock().unwrap()` → poison recovery
+- Stability: `write_routing_info` sync file I/O in async handler → spawn_blocking
+- Performance: regex compiled per-request → cached `Lazy<Regex>`
 - localStorage guard: try/catch on all access points (prevents total JS crash)
 - Logs tab i18n: all strings now use translation keys
 - Dark theme: CSS variables + `html.dark` class (robust against Tailwind overrides)
+- Container startup: PID file moved from `~/.claude-code-mux/ccm.pid` (persistent volume) → `/tmp/ccm.pid` (ephemeral), preventing stale-PID blocking on container restart
 
 ## [0.6.0] - 2025-11-19
 

@@ -2,20 +2,19 @@ use std::fs;
 use std::io::{self, ErrorKind};
 use std::path::PathBuf;
 
-/// Get the PID file path
+/// Get the PID file path.
+///
+/// Uses `/tmp/ccm.pid` so the PID file does not persist across container
+/// restarts. Writing to a persistent volume (e.g. ~/.claude-code-mux/) causes
+/// a stale PID file after a crash/restart, which prevents the container from
+/// starting because `is_process_running` sees the old PID.
 pub fn get_pid_file() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".claude-code-mux").join("ccm.pid")
+    PathBuf::from("/tmp/ccm.pid")
 }
 
 /// Write the current process PID to the PID file
 pub fn write_pid() -> io::Result<()> {
     let pid_file = get_pid_file();
-
-    // Create parent directory if it doesn't exist
-    if let Some(parent) = pid_file.parent() {
-        fs::create_dir_all(parent)?;
-    }
 
     let pid = std::process::id();
     fs::write(&pid_file, pid.to_string())?;
