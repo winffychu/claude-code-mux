@@ -208,7 +208,7 @@
                         <button
                             onclick="showTab('overview')"
                             id="tab-overview"
-                            data-i18n="tab.overview"
+                            data-i18n="nav.overview"
                             class="tab-active w-full text-left px-4 py-3 rounded-lg hover:bg-gray-50 transition-colors text-[15px]"
                         >
                             Overview
@@ -216,7 +216,7 @@
                         <button
                             onclick="showTab('models')"
                             id="tab-models"
-                            data-i18n="tab.models"
+                            data-i18n="nav.models"
                             class="w-full text-left px-4 py-3 rounded-lg hover:bg-gray-50 transition-colors text-[15px] text-gray-600"
                         >
                             Models
@@ -224,7 +224,7 @@
                         <button
                             onclick="showTab('providers')"
                             id="tab-providers"
-                            data-i18n="tab.providers"
+                            data-i18n="nav.providers"
                             class="w-full text-left px-4 py-3 rounded-lg hover:bg-gray-50 transition-colors text-[15px] text-gray-600"
                         >
                             Providers
@@ -232,7 +232,7 @@
                         <button
                             onclick="showTab('router')"
                             id="tab-router"
-                            data-i18n="tab.router"
+                            data-i18n="nav.router"
                             class="w-full text-left px-4 py-3 rounded-lg hover:bg-gray-50 transition-colors text-[15px] text-gray-600"
                         >
                             Router
@@ -240,7 +240,7 @@
                         <button
                             onclick="showTab('settings')"
                             id="tab-settings"
-                            data-i18n="tab.settings"
+                            data-i18n="nav.settings"
                             class="w-full text-left px-4 py-3 rounded-lg hover:bg-gray-50 transition-colors text-[15px] text-gray-600"
                         >
                             Settings
@@ -248,7 +248,7 @@
                         <button
                             onclick="showTab('logs')"
                             id="tab-logs"
-                            data-i18n="tab.logs"
+                            data-i18n="nav.logs"
                             class="w-full text-left px-4 py-3 rounded-lg hover:bg-gray-50 transition-colors text-[15px] text-gray-600"
                         >
                             Logs
@@ -264,11 +264,12 @@
                         class="w-full btn-secondary text-sm py-3 flex items-center justify-center gap-2"
                     >
                         <span id="theme-icon">🌙</span>
-                        <span id="theme-label">Dark</span>
+                        <span id="theme-label" data-i18n="label.dark_theme">Dark</span>
                     </button>
                     <button
                         onclick="saveConfig()"
                         class="w-full btn-primary text-sm py-3"
+                        data-i18n="button.save"
                     >
                         💾 Save
                     </button>
@@ -374,7 +375,7 @@
                     </div>
 
                     <div class="card mt-6">
-                        <h2 class="text-2xl font-bold mb-6">API Endpoints</h2>
+                        <h2 class="text-2xl font-bold mb-6" data-i18n="label.api_endpoints">API Endpoints</h2>
                         <div class="space-y-3">
                             <div
                                 class="p-4 rounded-lg bg-gray-50 border border-gray-200"
@@ -467,7 +468,7 @@
                 <!-- Providers Tab -->
                 <div id="content-providers" class="tab-content hidden">
                     <div id="providers-list-view">
-                        <h1 class="text-4xl font-bold mb-3" data-i18n="tab.providers">Providers</h1>
+                        <h1 class="text-4xl font-bold mb-3" data-i18n="tab.providers" data-i18n="heading.providers">Providers</h1>
                         <p class="text-gray-600 text-lg mb-12">
                             Connect and manage AI providers
                         </p>
@@ -475,6 +476,7 @@
                         <button
                             onclick="showAddProvider()"
                             class="btn-primary mb-8"
+                            data-i18n="button.add_provider"
                         >
                             Add Provider
                         </button>
@@ -503,11 +505,12 @@
                                         </div>
                                     </div>
                                     <div class="flex gap-2">
-                                        <button class="btn-secondary">
+                                        <button class="btn-secondary" data-i18n="button.edit">
                                             Edit
                                         </button>
                                         <button
                                             class="btn-secondary text-red-600"
+                                            data-i18n="button.delete"
                                         >
                                             Delete
                                         </button>
@@ -632,12 +635,12 @@
                                     Choose a name for this provider
                                 </h2>
                                 <div>
-                                    <label class="label">Name</label>
+                                    <label class="label" data-i18n="label.name">Name</label>
                                     <input
                                         type="text"
                                         name="provider_name"
                                         class="input-field"
-                                        placeholder="e.g., anthropic-main"
+                                        data-i18n-placeholder="placeholder.e_g_anthropic_main" placeholder="e.g., anthropic-main"
                                         required
                                     />
                                     <div class="helper-text">
@@ -655,19 +658,19 @@
                                 <!-- Anthropic-compatible Presets -->
                                 <div id="anthropic-preset-section" class="hidden space-y-6">
                                     <div>
-                                        <label class="label">Preset</label>
+                                        <label class="label" data-i18n="label.preset">Preset</label>
                                         <select
                                             id="anthropic-preset"
                                             class="input-field"
                                             onchange="applyAnthropicPreset()"
                                         >
-                                            <option value="anthropic">Anthropic (api.anthropic.com)</option>
-                                            <option value="custom">Custom</option>
-                                            <option value="openrouter">OpenRouter (openrouter.ai)</option>
+                                            <option value="anthropic" data-i18n="option.anthropic">Anthropic (api.anthropic.com)</option>
+                                            <option value="custom" data-i18n="option.custom">Custom</option>
+                                            <option value="openrouter" data-i18n="option.openrouter">OpenRouter (openrouter.ai)</option>
                                             <option value="z.ai">z.ai (api.z.ai)</option>
-                                            <option value="minimax">Minimax</option>
-                                            <option value="kimi-coding">Kimi For Coding</option>
-                                            <option value="zenmux">ZenMux</option>
+                                            <option value="minimax" data-i18n="option.minimax">Minimax</option>
+                                            <option value="kimi-coding" data-i18n="option.kimi">Kimi For Coding</option>
+                                            <option value="zenmux" data-i18n="option.zenmux">ZenMux</option>
                                         </select>
                                         <div class="helper-text">
                                             Select a preset to auto-fill base URL
@@ -675,12 +678,12 @@
                                     </div>
 
                                     <div>
-                                        <label class="label">Base URL</label>
+                                        <label class="label" data-i18n="label.base_url">Base URL</label>
                                         <input
                                             type="url"
                                             id="anthropic-base-url"
                                             class="input-field font-mono"
-                                            placeholder="https://api.anthropic.com"
+                                            data-i18n-placeholder="placeholder.base_url_anthropic" placeholder="https://api.anthropic.com"
                                         />
                                         <div class="helper-text">
                                             Leave empty for default endpoint
@@ -697,17 +700,17 @@
                                             class="input-field"
                                             onchange="applyOpenAIPreset()"
                                         >
-                                            <option value="openai">OpenAI (api.openai.com)</option>
+                                            <option value="openai" data-i18n="option.openai">OpenAI (api.openai.com)</option>
                                             <option value="custom">Custom</option>
-                                            <option value="groq">Groq</option>
-                                            <option value="together">Together AI</option>
-                                            <option value="fireworks">Fireworks AI</option>
-                                            <option value="deepinfra">Deepinfra</option>
-                                            <option value="nebius">Nebius</option>
-                                            <option value="cerebras">Cerebras</option>
-                                            <option value="moonshot">Moonshot AI</option>
-                                            <option value="baseten">Baseten</option>
-                                            <option value="novita">NovitaAI</option>
+                                            <option value="groq" data-i18n="option.groq">Groq</option>
+                                            <option value="together" data-i18n="option.together">Together AI</option>
+                                            <option value="fireworks" data-i18n="option.fireworks">Fireworks AI</option>
+                                            <option value="deepinfra" data-i18n="option.deepinfra">Deepinfra</option>
+                                            <option value="nebius" data-i18n="option.nebius">Nebius</option>
+                                            <option value="cerebras" data-i18n="option.cerebras">Cerebras</option>
+                                            <option value="moonshot" data-i18n="option.moonshot">Moonshot AI</option>
+                                            <option value="baseten" data-i18n="option.baseten">Baseten</option>
+                                            <option value="novita" data-i18n="option.novita">NovitaAI</option>
                                         </select>
                                         <div class="helper-text">
                                             Select a preset to auto-fill base URL and headers
@@ -720,7 +723,7 @@
                                             type="url"
                                             id="openai-base-url"
                                             class="input-field font-mono"
-                                            placeholder="https://api.openai.com/v1"
+                                            data-i18n-placeholder="placeholder.base_url_openai" placeholder="https://api.openai.com/v1"
                                         />
                                         <div class="helper-text">
                                             The base URL for the OpenAI-compatible API
@@ -728,7 +731,7 @@
                                     </div>
 
                                     <div>
-                                        <label class="label">Custom Headers (JSON, optional)</label>
+                                        <label class="label" data-i18n="label.custom_headers">Custom Headers (JSON, optional)</label>
                                         <textarea
                                             id="openai-headers"
                                             class="input-field font-mono"
@@ -750,8 +753,8 @@
                                             class="input-field"
                                             onchange="applyGeminiPreset()"
                                         >
-                                            <option value="gemini">Google AI Studio</option>
-                                            <option value="vertex-ai">Vertex AI (GCP)</option>
+                                            <option value="gemini" data-i18n="option.google_ai">Google AI Studio</option>
+                                            <option value="vertex-ai" data-i18n="option.vertex_gcp">Vertex AI (GCP)</option>
                                         </select>
                                         <div class="helper-text">
                                             Select Google AI Studio or Vertex AI
@@ -761,13 +764,13 @@
                                     <!-- Vertex AI specific fields -->
                                     <div id="vertex-ai-fields" class="hidden space-y-4">
                                         <div>
-                                            <label class="label">Project ID</label>
+                                            <label class="label" data-i18n="label.project_id">Project ID</label>
                                             <input
                                                 type="text"
                                                 id="vertex-project-id"
                                                 name="vertex_project_id"
                                                 class="input-field font-mono"
-                                                placeholder="my-gcp-project"
+                                                data-i18n-placeholder="placeholder.gcp_project" placeholder="my-gcp-project"
                                             />
                                             <div class="helper-text">
                                                 Your Google Cloud Project ID
@@ -775,7 +778,7 @@
                                         </div>
 
                                         <div>
-                                            <label class="label">Location</label>
+                                            <label class="label" data-i18n="label.location">Location</label>
                                             <select
                                                 id="vertex-location"
                                                 name="vertex_location"
@@ -789,8 +792,8 @@
                                                 <option value="europe-west1">europe-west1</option>
                                                 <option value="europe-west2">europe-west2</option>
                                                 <option value="europe-west4">europe-west4</option>
-                                                <option value="asia-east1">asia-east1</option>
-                                                <option value="asia-northeast1">asia-northeast1</option>
+                                                <option value="asia-east1" data-i18n="option.region_asia_east1">asia-east1</option>
+                                                <option value="asia-northeast1" data-i18n="option.region_asia_northeast1">asia-northeast1</option>
                                                 <option value="asia-southeast1">asia-southeast1</option>
                                             </select>
                                             <div class="helper-text">
@@ -800,7 +803,7 @@
 
                                         <div class="bg-yellow-50 border-l-4 border-yellow-400 p-3">
                                             <p class="text-sm text-yellow-800">
-                                                <strong>Authentication:</strong><br>
+                                                <strong data-i18n="label.authentication">Authentication:</strong><br>
                                                 Vertex AI uses Application Default Credentials (ADC).
                                                 Before starting the server, run:<br>
                                                 <code class="bg-yellow-100 px-1 mt-1 block">gcloud auth application-default login</code>
@@ -878,13 +881,13 @@
 
                                 <!-- API Key Input (shown by default) -->
                                 <div id="api-key-section">
-                                    <label class="label">API Key</label>
+                                    <label class="label" data-i18n="label.api_key">API Key</label>
                                     <input
                                         type="password"
                                         id="api-key-input"
                                         name="api_key"
                                         class="input-field font-mono"
-                                        placeholder="sk-ant-..."
+                                        data-i18n-placeholder="placeholder.api_key" placeholder="sk-ant-..."
                                     />
                                 </div>
 
@@ -917,7 +920,7 @@
                                                         type="button"
                                                         onclick="startOAuthFlow()"
                                                         class="btn-primary"
-                                                    >
+                                                     data-i18n="button.authenticate">
                                                         🔐 Start OAuth Login
                                                     </button>
                                                 </div>
@@ -953,7 +956,7 @@
                                                         type="text"
                                                         id="oauth-code-input"
                                                         class="input-field font-mono"
-                                                        placeholder="Paste the code here..."
+                                                        data-i18n-placeholder="placeholder.paste_code" placeholder="Paste the code here..."
                                                     />
                                                     <div
                                                         class="flex gap-2 mt-4"
@@ -969,8 +972,7 @@
                                                         <button
                                                             type="button"
                                                             onclick="cancelOAuthFlow()"
-                                                            class="btn-secondary"
-                                                        >
+                                                            class="btn-secondary" data-i18n="button.cancel">
                                                             Cancel
                                                         </button>
                                                     </div>
@@ -1034,7 +1036,7 @@
                 <!-- Models Tab -->
                 <div id="content-models" class="tab-content hidden">
                     <div id="models-list-view">
-                        <h1 class="text-4xl font-bold mb-3" data-i18n="tab.models">Models</h1>
+                        <h1 class="text-4xl font-bold mb-3" data-i18n="tab.models" data-i18n="heading.models">Models</h1>
                         <p class="text-gray-600 text-lg mb-12">
                             Improve stability with multiple providers
                         </p>
@@ -1042,6 +1044,7 @@
                         <button
                             onclick="showAddModel()"
                             class="btn-primary mb-8"
+                            data-i18n="button.add_model"
                         >
                             Add Model
                         </button>
@@ -1080,11 +1083,12 @@
                                         </div>
                                     </div>
                                     <div class="flex gap-2">
-                                        <button class="btn-secondary">
+                                        <button class="btn-secondary" data-i18n="button.edit">
                                             Edit
                                         </button>
                                         <button
                                             class="btn-secondary text-red-600"
+                                            data-i18n="button.delete"
                                         >
                                             Delete
                                         </button>
@@ -1123,7 +1127,7 @@
                             ← Back to Models
                         </button>
 
-                        <h1 class="text-4xl font-bold mb-3">Add Model</h1>
+                        <h1 class="text-4xl font-bold mb-3" data-i18n="modal.add_model">Add Model</h1>
                         <p class="text-gray-600 text-lg mb-12">
                             Configure multiple providers to increase reliability
                         </p>
@@ -1135,12 +1139,12 @@
                                     Choose a name for this model
                                 </h2>
                                 <div>
-                                    <label class="label">Model Name</label>
+                                    <label class="label" data-i18n="label.model_name">Model Name</label>
                                     <input
                                         type="text"
                                         name="model_name"
                                         class="input-field font-mono"
-                                        placeholder="e.g., claude-sonnet-4-5"
+                                        data-i18n-placeholder="placeholder.e_g_model" placeholder="e.g., claude-sonnet-4-5"
                                         required
                                     />
                                     <div class="helper-text">
@@ -1213,7 +1217,7 @@
                                                     type="text"
                                                     name="mappings[0][actual_model]"
                                                     class="input-field font-mono"
-                                                    placeholder="e.g., claude-sonnet-4-5 or anthropic/claude-sonnet-4-5"
+                                                    data-i18n-placeholder="placeholder.e_g_model_full" placeholder="e.g., claude-sonnet-4-5 or anthropic/claude-sonnet-4-5"
                                                     required
                                                 />
                                                 <div class="helper-text">
@@ -1326,7 +1330,7 @@
                             <label class="block text-sm font-medium text-gray-700 mt-4 mb-2" data-i18n="label.long_context_threshold">
                                 Long Context Threshold (tokens)
                             </label>
-                            <input type="number" name="long_context_threshold" class="input-field" min="1000" step="1000" placeholder="100000" value="100000" />
+                            <input type="number" name="long_context_threshold" class="input-field" min="1000" step="1000" data-i18n-placeholder="placeholder.threshold" placeholder="100000" value="100000" />
                         </div>
                     </form>
 
@@ -1386,7 +1390,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                                         type="text"
                                         id="auto-map-regex"
                                         class="input-field font-mono"
-                                        placeholder="^claude-"
+                                        data-i18n-placeholder="placeholder.model_regex" placeholder="^claude-"
                                     />
                                     <p class="text-sm text-gray-500 mt-2">
                                         Models matching this regex will be
@@ -1431,7 +1435,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
 
                         <!-- OAuth Tokens Management -->
                         <div class="card">
-                            <h2 class="text-xl font-bold mb-4">OAuth Tokens</h2>
+                            <h2 class="text-xl font-bold mb-4" data-i18n="label.oauth_tokens">OAuth Tokens</h2>
                             <p class="text-gray-600 mb-6">
                                 Manage your Claude Pro/Max OAuth authentication
                                 tokens
@@ -1506,7 +1510,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                                     onclick="reloadConfig()"
                                     class="btn-primary flex-1"
                                     data-i18n="button.reload_config"
-                                >
+                                 data-i18n="button.reload">
                                     Reload Config
                                 </button>
                             </div>
@@ -1531,16 +1535,16 @@ strip_match = false             # strip matched phrase (default: false)</pre>
 
                     <div id="logs-toolbar" class="flex items-center gap-4 mb-6">
                         <select id="logs-filter-dir" class="input-field max-w-xs" onchange="loadLogs()">
-                            <option value="" data-i18n="logs.filter_all">All directions</option>
-                            <option value="req" data-i18n="logs.filter_req">Requests (req)</option>
-                            <option value="res" data-i18n="logs.filter_res">Responses (res)</option>
-                            <option value="err" data-i18n="logs.filter_err">Errors (err)</option>
+                            <option value="" data-i18n="logs.filter_all" data-i18n="option.all_directions">All directions</option>
+                            <option value="req" data-i18n="logs.dir_req">Requests (req)</option>
+                            <option value="res" data-i18n="logs.dir_res">Responses (res)</option>
+                            <option value="err" data-i18n="logs.dir_err">Errors (err)</option>
                         </select>
-                        <input id="logs-filter-id" type="text" data-i18n-ph="logs.filter_id_placeholder" placeholder="Filter by trace ID" class="input-field max-w-xs" oninput="loadLogs()" />
+                        <input id="logs-filter-id" type="text" data-i18n-placeholder="placeholder.filter_trace_id" data-i18n-placeholder="logs.filter_id_placeholder" placeholder="Filter by trace ID" class="input-field max-w-xs" oninput="loadLogs()" />
                         <label class="flex items-center gap-2 text-sm text-gray-600">
                             <input id="logs-live" type="checkbox" onchange="toggleLogsStream()" disabled /> <span data-i18n="logs.live_sse">Live (SSE)</span>
                         </label>
-                        <button onclick="loadLogs()" class="btn-primary text-sm px-4 py-2" data-i18n="logs.refresh">Refresh</button>
+                        <button onclick="loadLogs()" class="btn-primary text-sm px-4 py-2" data-i18n="logs.refresh" data-i18n="button.refresh">Refresh</button>
                         <span id="logs-count" class="text-sm text-gray-500 ml-auto"></span>
                     </div>
 
@@ -1551,7 +1555,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
 
                 <!-- Test Tab -->
                 <div id="content-test" class="tab-content hidden">
-                    <h1 class="text-4xl font-bold mb-3">Test Models</h1>
+                    <h1 class="text-4xl font-bold mb-3" data-i18n="button.test_models">Test Models</h1>
                     <p class="text-gray-600 text-lg mb-12">
                         Test your registered models with custom messages
                     </p>
@@ -1613,7 +1617,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                                 id="test-message-input"
                                 class="input-field font-mono text-sm"
                                 rows="8"
-                                placeholder="Enter your message here..."
+                                data-i18n-placeholder="placeholder.message_input" placeholder="Enter your message here..."
                             ></textarea>
 
                             <!-- Advanced Options -->
@@ -1664,7 +1668,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                                                 id="test-stream"
                                                 class="rounded"
                                             />
-                                            <span>Enable Streaming</span>
+                                            <span data-i18n="button.enable_streaming">Enable Streaming</span>
                                         </label>
                                     </div>
                                 </div>
@@ -1690,7 +1694,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                         <!-- Response Display -->
                         <div id="test-response-container" class="card hidden">
                             <div class="flex items-center justify-between mb-4">
-                                <h3 class="text-lg font-semibold">Response</h3>
+                                <h3 class="text-lg font-semibold" data-i18n="label.response">Response</h3>
                                 <div
                                     class="flex items-center gap-2 text-sm text-gray-600"
                                 >
@@ -1722,7 +1726,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                                             d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                                         ></path>
                                     </svg>
-                                    <span>Generating response...</span>
+                                    <span data-i18n="toast.generating_response">Generating response...</span>
                                 </div>
                             </div>
 
@@ -2252,7 +2256,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                             <thead>
                                 <tr class="text-left text-gray-600 border-b">
                                     <th class="pb-2 font-semibold">Pattern</th>
-                                    <th class="pb-2 font-semibold">Model</th>
+                                    <th class="pb-2 font-semibold" data-i18n="logs.col_model">Model</th>
                                     <th class="pb-2 font-semibold">Strip Match</th>
                                 </tr>
                             </thead>
@@ -2331,8 +2335,8 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                     tracingToggle.checked = !!appState.config.server.tracing.enabled;
                     if (tracingStatus) {
                         tracingStatus.textContent = tracingToggle.checked
-                            ? (i18n && i18n["settings.tracing_enabled"]) || "Tracing enabled. Logs will be recorded."
-                            : (i18n && i18n["settings.tracing_disabled"]) || "Tracing disabled. No logs will be recorded.";
+                            ? t("settings.tracing_enabled")
+                            : t("settings.tracing_disabled");
                     }
                 }
 
@@ -2348,8 +2352,8 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                 const enabled = toggle.checked;
                 if (status) {
                     status.textContent = enabled
-                        ? (i18n && i18n["toast.tracing_enabling"]) || "Enabling tracing..."
-                        : (i18n && i18n["toast.tracing_disabling"]) || "Disabling tracing...";
+                        ? t("toast.tracing_enabling")
+                        : t("toast.tracing_disabling");
                 }
                 // Update config server.tracing.enabled
                 if (!appState.config.server) appState.config.server = {};
@@ -2421,8 +2425,8 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                                 </div>
                             </div>
                             <div class="flex gap-2">
-                                <button class="btn-secondary" onclick="editProvider(${index})">Edit</button>
-                                <button class="btn-secondary text-red-600" onclick="deleteProvider(${index})">Delete</button>
+                                <button class="btn-secondary"  data-i18n="button.edit" onclick="editProvider\(\$\{index\}\)">Edit</button>
+                                <button class="btn-secondary text-red-600"  data-i18n="button.delete" onclick="deleteProvider\(\$\{index\}\)">Delete</button>
                             </div>
                         </div>
                     `;
@@ -2636,7 +2640,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                         'button[type="submit"]',
                     );
                     if (submitBtn) {
-                        submitBtn.textContent = "Edit Provider";
+                        submitBtn.textContent = t("modal.edit_provider");
                     }
                 }, 100);
             }
@@ -2727,8 +2731,8 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                                     </div>
                                 </div>
                                 <div class="flex gap-2">
-                                    <button class="btn-secondary" onclick="editModel(${index})">Edit</button>
-                                    <button class="btn-secondary text-red-600" onclick="deleteModel(${index})">Delete</button>
+                                    <button class="btn-secondary"  data-i18n="button.edit" onclick="editModel\(\$\{index\}\)">Edit</button>
+                                    <button class="btn-secondary text-red-600"  data-i18n="button.delete" onclick="deleteModel\(\$\{index\}\)">Delete</button>
                                 </div>
                             </div>
                         `;
@@ -2864,7 +2868,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                                     <div>
                                         <label class="label">Select Provider</label>
                                         <select name="mappings[${index}][provider]" class="input-field" required>
-                                            <option value="">Choose a provider</option>
+                                            <option value="" data-i18n="option.select_provider_default">Choose a provider</option>
                                             ${providerOptions}
                                         </select>
                                     </div>
@@ -2880,7 +2884,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                                 <div class="flex items-center justify-between mb-4">
                                     <div class="flex items-center gap-3">
                                         <span class="px-3 py-1 bg-gray-200 text-gray-700 rounded-lg font-bold text-sm">Priority ${mapping.priority}</span>
-                                        <span class="text-gray-600 font-semibold">Fallback</span>
+                                        <span class="text-gray-600 font-semibold" data-i18n="label.fallback">Fallback</span>
                                     </div>
                                     <div class="flex gap-2">
                                         <button type="button" onclick="moveMappingUp(this)" class="p-2 hover:bg-gray-100 rounded-lg">
@@ -3782,7 +3786,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
 
                 // Clear existing options except the first one
                 select.innerHTML =
-                    '<option value="">Choose a model...</option>';
+                    '<option value="" data-i18n="option.choose_model">Choose a model...</option>';
 
                 // Add models from config
                 models.forEach((model) => {
@@ -3811,7 +3815,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
 
                 // Clear provider options
                 providerSelect.innerHTML =
-                    '<option value="">Use default routing...</option>';
+                    '<option value="" data-i18n="button.use_default_routing">Use default routing...</option>';
 
                 // Find the model config
                 const modelConfig = appState.config.models.find(
@@ -4286,7 +4290,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                 try {
                     const response = await fetch("/api/oauth/tokens");
                     if (!response.ok) {
-                        throw new Error("Failed to load OAuth tokens");
+                        throw new Error(t("toast.oauth_failed"));
                     }
 
                     const tokens = await response.json();
@@ -4418,7 +4422,7 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                             <p class="mb-2">Click the button below to authenticate with your Google account.</p>
                             <div class="bg-yellow-50 border-l-4 border-yellow-400 p-3 mt-2">
                                 <p class="text-sm text-yellow-800">
-                                    <strong>Google Cloud Project ID:</strong><br>
+                                    <strong data-i18n="label.google_cloud_project">Google Cloud Project ID:</strong><br>
                                     - <strong>Individual accounts</strong>: No project ID needed<br>
                                     - <strong>Workspace/licensed users</strong>: Set <code class="bg-yellow-100 px-1">GOOGLE_CLOUD_PROJECT</code> environment variable before starting server
                                 </p>
