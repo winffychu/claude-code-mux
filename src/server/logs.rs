@@ -1,9 +1,14 @@
-//! /api/logs —— trace.jsonl 日志查看端点
+//! /api/logs —— trace 日志查看端点
 //!
 //! 两个端点：
-//!   GET  /api/logs        —— 分页读取历史日志（最新在前）
-//!   GET  /api/logs/stream —— SSE 实时流（轮询文件 mtime）
+//!   GET  /api/logs        —— 分页读取历史日志（最新在前），来源为内存环形缓冲
+//!   GET  /api/logs/stream —— SSE 实时流，来源为 broadcast channel（写一条推一条）
+//!
+//! Architecture (P6): the display source is the in-memory ring buffer in
+//! `MessageTracer`, not the trace file.  File output is orthogonal and only
+//! exists for `tail -f` CLI debugging — this module never touches the file.
 
+use crate::message_tracing::LogEntry;
 use crate::server::AppState;
 use axum::{
     extract::{Query, State},
@@ -11,13 +16,10 @@ use axum::{
     response::sse::{Event, KeepAlive, Sse},
     Json,
 };
-use chrono::{DateTime, Utc};
-use futures::StreamExt;
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use serde::Deserialize;
+use std::convert::Infallible;
 use std::sync::Arc;
-use std::time::SystemTime;
-use tokio::time::Duration;
+use tokio_stream::wrappers::BroadcastStream;
 
 /// 日志查询参数
 #[derive(Deserialize)]
@@ -38,35 +40,8 @@ fn default_limit() -> usize {
     100
 }
 
-/// 单条日志的 API 视图——精简，不含完整 messages 体（隐私+体积）
-/// 现有 RequestTrace 另有 tool_count/messages 2 个字段，LogEntry 不暴露
-#[derive(Serialize, Clone)]
-pub struct LogEntry {
-    pub ts: DateTime<Utc>,
-    pub dir: String,
-    pub id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub route_type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_stream: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub latency_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub stop_reason: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub input_tokens: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub output_tokens: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-}
-
 /// 分页响应
-#[derive(Serialize)]
+#[derive(serde::Serialize)]
 pub struct LogsResponse {
     pub entries: Vec<LogEntry>,
     pub total: usize,
@@ -76,104 +51,16 @@ pub struct LogsResponse {
     pub tracing_enabled: bool,
 }
 
-/// 从一行 JSON 解析出 LogEntry（宽进宽出：字段缺失跳过，整个行损坏跳过）
-fn parse_line(line: &str) -> Option<LogEntry> {
-    let v: serde_json::Value = serde_json::from_str(line).ok()?;
-    let dir = v.get("dir")?.as_str()?.to_string();
-    let id = v.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
-    let ts = v
-        .get("ts")
-        .and_then(|t| serde_json::from_value(t.clone()).ok())
-        .unwrap_or_else(Utc::now);
-
-    let (model, provider, route_type, is_stream) = if dir == "req" {
-        (
-            v.get("model").map(|m| m.as_str().unwrap_or("").to_string()),
-            v.get("provider").map(|p| p.as_str().unwrap_or("").to_string()),
-            v.get("route_type").map(|r| r.as_str().unwrap_or("").to_string()),
-            v.get("is_stream").and_then(|s| s.as_bool()),
-        )
-    } else {
-        (None, None, None, None)
-    };
-
-    let (latency_ms, stop_reason, input_tokens, output_tokens) = if dir == "res" {
-        (
-            v.get("latency_ms").and_then(|x| x.as_u64()),
-            v.get("stop_reason").map(|s| s.as_str().unwrap_or("").to_string()),
-            v.get("input_tokens").and_then(|x| x.as_u64()).map(|x| x as u32),
-            v.get("output_tokens").and_then(|x| x.as_u64()).map(|x| x as u32),
-        )
-    } else {
-        (None, None, None, None)
-    };
-
-    let error = if dir == "err" {
-        v.get("error").map(|e| e.as_str().unwrap_or("").to_string())
-    } else {
-        None
-    };
-
-    Some(LogEntry {
-        ts,
-        dir,
-        id,
-        model,
-        provider,
-        route_type,
-        is_stream,
-        latency_ms,
-        stop_reason,
-        input_tokens,
-        output_tokens,
-        error,
-    })
-}
-
-/// 按 dir/id 过滤
-fn matches_filters(entry: &LogEntry, q: &LogsQuery) -> bool {
-    if let Some(ref d) = q.dir {
-        if entry.dir != *d {
-            return false;
-        }
-    }
-    if let Some(ref id) = q.id {
-        if entry.id != *id {
-            return false;
-        }
-    }
-    true
-}
-
-/// 读取整个 trace 文件，返回 (所有解析成功的条目, 总行数)
-fn read_all(path: &PathBuf) -> (Vec<LogEntry>, usize) {
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return (Vec::new(), 0),
-    };
-    let mut entries = Vec::new();
-    let mut total = 0usize;
-    for line in content.lines() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        total += 1;
-        if let Some(e) = parse_line(line) {
-            entries.push(e);
-        }
-    }
-    (entries, total)
-}
-
-/// GET /api/logs —— 分页读取历史日志（最新在前）
+/// GET /api/logs —— 从内存环形缓冲分页读取历史日志（最新在前）
 pub async fn get_logs(
     State(state): State<Arc<AppState>>,
     Query(q): Query<LogsQuery>,
 ) -> Result<Json<LogsResponse>, (StatusCode, String)> {
     let limit = q.limit.min(500);
-
     let inner = state.snapshot();
-    let Some(path) = inner.message_tracer.trace_path() else {
+    let tracer = &inner.message_tracer;
+
+    if !tracer.is_enabled() {
         return Ok(Json(LogsResponse {
             entries: Vec::new(),
             total: 0,
@@ -181,186 +68,113 @@ pub async fn get_logs(
             offset: q.offset,
             tracing_enabled: false,
         }));
-    };
-
-    let (mut entries, _total_lines) = read_all(&path);
-
-    // 过滤
-    if q.dir.is_some() || q.id.is_some() {
-        entries.retain(|e| matches_filters(e, &q));
     }
 
-    let filtered_total = entries.len();
-
-    // 从尾部向前取（offset 跳过最近 N 条），最新在前
-    let start = q.offset;
-    let end = (start + limit).min(filtered_total);
-    let entries: Vec<LogEntry> = if start >= filtered_total {
-        Vec::new()
-    } else {
-        entries[start..end].iter().rev().cloned().collect()
-    };
+    let (entries, total) = tracer.read_recent(limit, q.offset, q.dir.as_deref(), q.id.as_deref());
 
     Ok(Json(LogsResponse {
         entries,
-        total: filtered_total,
+        total,
         limit,
         offset: q.offset,
         tracing_enabled: true,
     }))
 }
 
-/// GET /api/logs/stream —— SSE 实时流（轮询文件 mtime，500ms 间隔）
+/// The number of most-recent entries a newly-connected SSE subscriber receives
+/// as an initial backlog before switching to live broadcast events.
+const SSE_BACKLOG: usize = 100;
+
+/// GET /api/logs/stream —— SSE 实时流，来源为 broadcast channel。
 ///
-/// 用 mpsc channel + spawn task 推送 Event；
-/// axum `Sse` 负责 hyper 层的即时 flush (framing)。
+/// 先从内存环形缓冲补发最近 `SSE_BACKLOG` 条历史，再订阅 broadcast channel
+/// 接收实时新条目。无文件轮询、无 mtime 检查，零延迟。
+/// tracing 未启用时只发 keep-alive，不发任何 data event。
 pub async fn stream_logs(
     State(state): State<Arc<AppState>>,
-) -> Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>> {
-    use std::convert::Infallible;
+) -> Sse<futures::stream::BoxStream<'static, Result<Event, Infallible>>> {
+    use futures::stream::StreamExt;
+
     let inner = state.snapshot();
-    let path = inner
-        .message_tracer
-        .trace_path()
-        .unwrap_or_else(|| PathBuf::from("/dev/null"));
+    let tracer = inner.message_tracer.clone();
 
-    let initial_pos = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    let combined = match tracer.subscribe() {
+        Some(rx) => {
+            // Initial backlog: most recent entries, oldest-first so the client
+            // sees them chronologically before live events arrive.
+            let (mut backlog, _) = tracer.read_recent(SSE_BACKLOG, 0, None, None);
+            backlog.reverse();
 
-    let (sse_tx, sse_rx) = tokio::sync::mpsc::channel::<Event>(32);
+            let backlog_stream = futures::stream::iter(backlog).map(|entry| {
+                let payload = serde_json::to_string(&entry).unwrap_or_default();
+                Ok::<Event, Infallible>(Event::default().data(payload))
+            });
 
-    tokio::spawn(async move {
-        let mut pos = initial_pos as usize;
-        let mut last_mtime = SystemTime::now();
-        loop {
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            let metadata = match std::fs::metadata(&path) {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-            let mtime = metadata.modified().unwrap_or(SystemTime::now());
-            if mtime == last_mtime {
-                continue;
-            }
-            let content = match std::fs::read_to_string(&path) {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
-            let bytes = content.as_bytes();
-            if pos >= bytes.len() {
-                last_mtime = mtime;
-                continue;
-            }
-            let new_content = &content[pos..];
-            pos = bytes.len();
-            let lines: Vec<&str> = new_content.lines().collect();
-            let payload = serde_json::json!({ "lines": lines }).to_string();
-            let event = Event::default().data(payload);
-            if sse_tx.send(event).await.is_err() {
-                break; // 客户端断开
-            }
-            last_mtime = mtime;
+            // Live events from the broadcast channel. Lagged receivers miss
+            // dropped entries — acceptable for a live feed.
+            let live = BroadcastStream::new(rx)
+                .filter_map(|res| {
+                    std::future::ready(res.ok().map(|entry| {
+                        let payload = serde_json::to_string(&entry).unwrap_or_default();
+                        Event::default().data(payload)
+                    }))
+                })
+                .map(Ok::<Event, Infallible>);
+
+            backlog_stream.chain(live).boxed()
         }
-    });
+        None => futures::stream::empty().boxed(),
+    };
 
-    // mpsc Receiver → Stream<Result<Event, Infallible>>
-    let stream = tokio_stream::wrappers::ReceiverStream::new(sse_rx)
-        .map(|e: Event| Ok::<Event, Infallible>(e));
-
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Sse::new(combined).keep_alive(KeepAlive::default())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
 
     #[test]
-    fn test_parse_line_req() {
-        let line = r#"{"ts":"2026-07-11T05:00:00Z","dir":"req","id":"abc12345","model":"claude-sonnet-4","provider":"nvidia","route_type":"long-context","is_stream":true,"tool_count":0,"messages":[]}"#;
-        let e = parse_line(line).expect("req line should parse");
-        assert_eq!(e.dir, "req");
-        assert_eq!(e.id, "abc12345");
-        assert_eq!(e.model.as_deref(), Some("claude-sonnet-4"));
-        assert_eq!(e.route_type.as_deref(), Some("long-context"));
-        assert_eq!(e.is_stream, Some(true));
-        assert!(e.latency_ms.is_none()); // req 不含 latency
-    }
-
-    #[test]
-    fn test_parse_line_res() {
-        let line = r#"{"ts":"2026-07-11T05:00:01Z","dir":"res","id":"abc12345","latency_ms":234,"stop_reason":"end_turn","input_tokens":100,"output_tokens":50,"content":[]}"#;
-        let e = parse_line(line).expect("res line should parse");
-        assert_eq!(e.dir, "res");
-        assert_eq!(e.latency_ms, Some(234));
-        assert_eq!(e.stop_reason.as_deref(), Some("end_turn"));
-        assert_eq!(e.input_tokens, Some(100));
-        assert_eq!(e.output_tokens, Some(50));
-        assert!(e.model.is_none()); // res 不含 model
-    }
-
-    #[test]
-    fn test_parse_line_err_and_corrupt() {
-        let err_line = r#"{"ts":"2026-07-11T05:00:02Z","dir":"err","id":"abc12345","error":"connection refused"}"#;
-        let e = parse_line(err_line).expect("err line should parse");
-        assert_eq!(e.dir, "err");
-        assert_eq!(e.error.as_deref(), Some("connection refused"));
-
-        // 损坏行应返回 None
-        assert!(parse_line("not json").is_none());
-        assert!(parse_line(r#"{"no_dir":"x"}"#).is_none());
-    }
-
-    #[test]
-    fn test_matches_filters() {
-        let q_all = LogsQuery {
-            limit: 100,
+    fn test_logsquery_defaults() {
+        let q = LogsQuery {
+            limit: 0, // serde default replaces this, but we test the struct directly
             offset: 0,
             dir: None,
             id: None,
         };
-        let q_req = LogsQuery {
-            limit: 100,
-            offset: 0,
-            dir: Some("req".to_string()),
-            id: None,
-        };
-        let q_id = LogsQuery {
-            limit: 100,
-            offset: 0,
-            dir: None,
-            id: Some("abc12345".to_string()),
-        };
-        let req_entry = LogEntry {
+        assert_eq!(q.offset, 0);
+        assert!(q.dir.is_none());
+        assert!(q.id.is_none());
+    }
+
+    #[test]
+    fn test_default_limit() {
+        assert_eq!(default_limit(), 100);
+    }
+
+    #[test]
+    fn test_logentry_roundtrips() {
+        let entry = LogEntry {
             ts: Utc::now(),
             dir: "req".to_string(),
-            id: "abc12345".to_string(),
-            model: None,
-            provider: None,
-            route_type: None,
-            is_stream: None,
+            id: "abc123".to_string(),
+            model: Some("claude-sonnet-4".to_string()),
+            provider: Some("nvidia".to_string()),
+            route_type: Some("long-context".to_string()),
+            is_stream: Some(true),
             latency_ms: None,
             stop_reason: None,
             input_tokens: None,
             output_tokens: None,
             error: None,
         };
-        let res_entry = LogEntry {
-            ts: Utc::now(),
-            dir: "res".to_string(),
-            id: "xyz".to_string(),
-            model: None,
-            provider: None,
-            route_type: None,
-            is_stream: None,
-            latency_ms: None,
-            stop_reason: None,
-            input_tokens: None,
-            output_tokens: None,
-            error: None,
-        };
-        assert!(matches_filters(&req_entry, &q_all));
-        assert!(matches_filters(&req_entry, &q_req));
-        assert!(!matches_filters(&res_entry, &q_req));
-        assert!(matches_filters(&req_entry, &q_id));
-        assert!(!matches_filters(&res_entry, &q_id));
+        let json = serde_json::to_string(&entry).unwrap();
+        let back: LogEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.dir, "req");
+        assert_eq!(back.id, "abc123");
+        assert_eq!(back.model.as_deref(), Some("claude-sonnet-4"));
+        assert_eq!(back.route_type.as_deref(), Some("long-context"));
+        assert_eq!(back.is_stream, Some(true));
+        assert!(back.latency_ms.is_none());
     }
 }

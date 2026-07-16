@@ -32,10 +32,26 @@ pub struct ServerConfig {
 }
 
 /// Message tracing configuration
+///
+/// Architecture (since P6): the in-memory ring buffer is the primary display
+/// source for `/api/logs` and `/api/logs/stream`.  File output (`path`) is
+/// optional, kept for `tail -f trace.jsonl` CLI debugging — when both are
+/// active, writes go to memory AND file (dual-write), but the web UI reads
+/// only from memory, so it never depends on file I/O or BufWriter flush timing.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TracingConfig {
     #[serde(default)]
     pub enabled: bool,
+    /// Maximum number of entries kept in the in-memory ring buffer (the web
+    /// log display source).  When full, oldest entries are dropped.  Default
+    /// 2000 (~400KB for the slim LogEntry view).  Only effective when
+    /// `enabled = true`.
+    #[serde(default = "default_max_entries")]
+    pub max_entries: usize,
+    /// Optional file persistence path.  Supports `~`.  Writes the full trace
+    /// (including messages body) for `tail -f` debugging — separate from the
+    /// memory buffer.  Set to a path to dual-write; keep the default path even
+    /// if you never use `tail -f` (it stays dormant unless the file is opened).
     #[serde(default = "default_tracing_path")]
     pub path: String,
     /// Omit system prompt from traces (default: true, since system prompts are huge)
@@ -47,6 +63,7 @@ impl Default for TracingConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            max_entries: default_max_entries(),
             path: default_tracing_path(),
             omit_system_prompt: true,
         }
@@ -55,6 +72,10 @@ impl Default for TracingConfig {
 
 fn default_tracing_path() -> String {
     "~/.claude-code-mux/trace.jsonl".to_string()
+}
+
+fn default_max_entries() -> usize {
+    2000
 }
 
 fn default_true() -> bool {

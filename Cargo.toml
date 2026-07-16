@@ -20,7 +20,7 @@ tower-http = { version = "0.5", features = ["fs", "trace", "cors"] }
 
 # Async Runtime
 tokio = { version = "1", features = ["full"] }
-tokio-stream = { version = "0.1", features = ["io-util"] }
+tokio-stream = { version = "0.1", features = ["io-util", "sync"] }
 futures = "0.3"
 
 # Serialization

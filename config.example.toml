@@ -42,21 +42,31 @@ connect_timeout_ms = 10_000
 
 # -----------------------------------------------------------------------------
 # [server.tracing] — Message tracing / request logging to JSONL
-# -----------------------------------------------------------------------------
-# Logs full request and response bodies to a JSONL file for debugging.
-# One JSON object per line, tagged with direction (req/res/err) and an
-# opaque request ID so you can correlate request/response pairs.
+# Logs request/response traces for the admin web UI logs view. The PRIMARY
+# display source is an in-memory ring buffer (no disk reads needed — entries
+# are visible immediately in the web UI). File output below is optional and
+# dual-writes the full traces (incl. message bodies) for `tail -f` CLI debugging.
 [server.tracing]
 # Enable message tracing. Default: false.
+# When true, recent entries are kept in an in-memory ring buffer (the web UI
+# reads from memory — no file I/O needed). Set false to free memory when you
+# don't need the logs view.
 enabled = false
 
-# Path to the trace JSONL file. Default: ~/.claude-code-mux/trace.jsonl.
-# Supports `~` shorthand for the home directory.
+# Max entries kept in the in-memory ring buffer (the web log display source).
+# When full the oldest entries are dropped. Default: 2000 (~400KB for the slim
+# view). Only effective when enabled = true.
+max_entries = 2000
+
+# Optional file persistence path for `tail -f` CLI debugging. Supports `~` for
+# home dir. Writes the FULL trace (including message bodies) — separate from
+# the memory buffer. Leave as the default path; the web UI never reads this file.
 path = "~/.claude-code-mux/trace.jsonl"
 
-# Omit the system prompt from trace entries. Default: true.
+# Omit the system prompt from file trace entries. Default: true.
 # System prompts are often very large; keeping this true reduces file size
-# and protects potentially sensitive system-prompt content.
+# and protects potentially sensitive system-prompt content. (Memory buffer
+# never stores full bodies, so this only affects the optional file.)
 omit_system_prompt = true
 
 # =============================================================================

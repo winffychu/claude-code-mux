@@ -913,35 +913,46 @@ This function:
 
 ### Message Tracing
 
-Log full request/response messages to JSONL for debugging. This is configured under the `[server.tracing]` section:
+View recent request/response traces in the admin web UI logs tab — the primary
+display source is an **in-memory ring buffer** (no file I/O needed; entries are
+visible immediately). File output is optional, for `tail -f` CLI debugging of
+the full message bodies.
+
+Configured under the `[server.tracing]` section:
 
 ```toml
 [server.tracing]
 enabled = true                # Enable tracing (default: false)
-path = "~/.claude-code-mux/trace.jsonl"  # JSONL output file path
-omit_system_prompt = true     # Skip large system prompts (default: true)
+max_entries = 2000            # In-memory ring buffer capacity (default: 2000)
+path = "~/.claude-code-mux/trace.jsonl"  # Optional file path (full traces for tail -f)
+omit_system_prompt = true     # Skip large system prompts in the FILE (default: true)
 ```
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `enabled` | bool | `false` | Enable/disable message tracing |
-| `path` | string | `~/.claude-code-mux/trace.jsonl` | Output file path (supports `~` for home dir) |
-| `omit_system_prompt` | bool | `true` | Omit system prompts from traces (reduces file size; system prompts are typically huge) |
+| `enabled` | bool | `false` | Enable tracing. When true, recent entries are kept in an in-memory ring buffer (web UI reads from memory — no file I/O) |
+| `max_entries` | usize | `2000` | In-memory ring buffer capacity; oldest entries are dropped when full (~400KB for the slim view). Only effective when `enabled = true` |
+| `path` | string | `~/.claude-code-mux/trace.jsonl` | Optional file path for `tail -f` debugging — dual-writes the full traces (incl. message bodies), separate from the memory buffer. Supports `~` |
+| `omit_system_prompt` | bool | `true` | Omit system prompts from the FILE (the memory buffer never stores full bodies) |
 
-**Output format** (one JSON per line):
+The web UI logs read from the **in-memory buffer**, so they are available
+immediately without waiting for disk flush. The optional file is only for users
+who want `tail -f` access to the full message bodies.
+
+**File output format** (one JSON per line, written only when tracing is enabled):
 ```jsonl
 {"ts":"...","dir":"req","id":"a1b2c3d4","model":"claude-sonnet-4","provider":"anthropic","messages":[...]}
 {"ts":"...","dir":"res","id":"a1b2c3d4","latency_ms":1250,"content":[...]}
 {"ts":"...","dir":"err","id":"e5f6g7h8","error":"Provider timeout"}
 ```
 
-**View traces:**
+**View file traces (optional):**
 ```bash
 tail -f ~/.claude-code-mux/trace.jsonl | jq
 grep '"id":"a1b2c3d4"' trace.jsonl | jq  # Filter by request
 ```
 
-Traces are also accessible via the API endpoints `GET /api/logs` (paginated) and `GET /api/logs/stream` (real-time SSE). See [API Endpoints](#api-endpoints) below.
+Traces are also accessible via the API endpoints `GET /api/logs` (paginated, reads from the in-memory buffer) and `GET /api/logs/stream` (real-time SSE via broadcast channel). See [API Endpoints](#api-endpoints) below.
 
 ## API Endpoints
 

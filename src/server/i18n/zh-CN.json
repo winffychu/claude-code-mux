@@ -162,7 +162,7 @@
   "toast.tracing_enabling": "正在启用追踪...",
   "toast.tracing_disabling": "正在禁用追踪...",
   "heading.request_logs": "请求日志",
-  "logs.description": "来自 trace.jsonl 的最近请求追踪（最新在前）",
+  "logs.description": "最近请求追踪（内存缓冲，最新在前）",
   "logs.tracing_off_warning": "⚠️ 追踪未启用。在设置中启用（[tracing] enabled = true）以开始收集日志。",
   "logs.filter_all": "所有方向",
   "logs.filter_req": "请求 (req)",
