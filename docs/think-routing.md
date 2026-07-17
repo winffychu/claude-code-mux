@@ -202,22 +202,31 @@ model = "think-target-model"
 
 ## 8. 真实流量数据佐证（远程实例 172.168.0.71:13456）
 
-读取用户实际在用的 ccm 实例 `/api/logs`（1400 条历史，tracing 开启）：
+读取用户实际在用的 ccm 实例 `/api/logs`（分页拉取 2015 条历史，tracing 开启）：
 
 | route_type | 数量 | 占比 |
 |:---:|---:|---:|
-| default | 1288 | **92%** |
-| think | 74 | 5.3% |
-| (res 条目未记录) | 38 err | — |
+| default | 1890 | **93.8%** |
+| think | 74 | 3.7% |
+| error(502) | 51 | 2.5% |
 
-被路由到 default 的请求中：model 主要是 `glm-5`（1324 条），少量
-`z-ai/glm-5.2`（38 条，且含 sub2api-cc 上游 502 错误）。
+**远程配置轮廓（从行为逆向推断，因远程无 /api/config 端点且 SSH 不通）**：
 
-think 命中的 74 条 model 也是 `glm-5` —— 说明远程 think target 映射的上游
-actual_model 也叫 glm-5（配置层面，非路由 bug）。
+- **provider × model**：
+  - `sub2api-cc` —— actual_model `glm-5`（default & think 同一 target）
+  - `nvidia` —— actual_model `z-ai/glm-5.2`
+- **router**：`default = glm-5`，`think = glm-5`（think 同 default，
+  命中 74 条但不换模型 → 思考路由在此实例无实际意义）。
+- **无 `[router.rules]` condition / 无 prompt_rules** —— route_type
+  字段从未出现 `prompt-rule` / `long-context` / `web-search`，think 全靠
+  `[router] think` 硬编码（即 `is_plan_mode`）命中。
+- **auto_map 默认 `^claude-`** —— `z-ai/glm-5.2` 不以 `claude-` 开头故不被吃，
+  保留原名走 default（52 条 nvidia + 1840 条 sub2api-cc glm-5 = default 1890）。
 
-**这证实了"大部分走 default"不是偶发，是稳定 92%。** think 命中的 74 条
-说明有客户端确实发顶层 thinking（`is_plan_mode` 能工作），但远少于 default。
+**疑似配置问题**：51 条 502 错误全是 `z-ai/glm-5.2` via `sub2api-cc`（上游
+报 `Upstream request failed`），但同一 actual_model `z-ai/glm-5.2` 经由
+`nvidia` 的 52 条无误 → `glm-5.2` 的 mappings fallback chain 把 sub2api-cc
+排在 nvidia 之前，而 sub2api-cc 在该模型上不可用。
 
 ---
 

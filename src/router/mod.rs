@@ -500,7 +500,17 @@ impl Router {
         // model-prefix examples that all use the `request.body.*` convention.
         let body = serde_json::to_value(request).ok()?;
         // Drop a leading "body" segment so `body.thinking.type` ≡ `thinking.type`.
-        let nav_parts: Vec<&str> = if parts.first().map(|p| *p == "body").unwrap_or(false) {
+        // (The serialized AnthropicRequest has no `body` wrapper.) We treat a
+        // bare `body` as `request.body` — i.e. the whole request — which is
+        // almost certainly a misconfiguration, but returning the whole request
+        // JSON would let `contains-deep`/`contains` match *anything* and cause
+        // surprising false positives. So a lone "body" yields None (no value),
+        // matching the prior behaviour where `body` was not a real key.
+        let is_bare_body = parts.len() == 1 && parts[0] == "body";
+        let nav_parts: Vec<&str> = if is_bare_body {
+            // Nothing to navigate to — signal "not found".
+            return None;
+        } else if parts.first().map(|p| *p == "body").unwrap_or(false) {
             parts[1..].to_vec()
         } else {
             parts.clone()
@@ -1081,6 +1091,19 @@ mod tests {
             route_with_rule(make_rule("body.thinking.type"), &mut req),
             "think.model"
         );
+
+        // Boundary: a bare `body` (or `request.body`) must resolve to None, NOT
+        // the whole serialized request. Otherwise `contains-deep`/`contains`
+        // would match *anything* and trigger surprising false positives. This
+        // preserves the pre-§6 behaviour where `body` was not a real JSON key.
+        let mut req = create_simple_request("hello world");
+        // `body` alone — left = "body", operator contains "hello" — must NOT match.
+        let rule_match = make_condition_rule(RuleOperator::Contains, "body", "hello", "think.model");
+        assert_ne!(route_with_rule(rule_match, &mut req), "think.model");
+        // `request.body` — same after stripping the `request.` prefix.
+        let rule_match_req =
+            make_condition_rule(RuleOperator::Contains, "request.body", "hello", "think.model");
+        assert_ne!(route_with_rule(rule_match_req, &mut req), "think.model");
     }
 
     #[test]
