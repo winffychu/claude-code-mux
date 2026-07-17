@@ -195,6 +195,81 @@ right = "thinking"
 model = "think-target-model"
 ```
 
-是否扩展取决于用户的 think 用例 —— 若客户端从不发顶层 thinking 且无模型名
-线索，则**任何路由层都无法自动判定**，只能靠 prompt-rule（用户在 prompt 里
-写触发词）或 subagent 标签，这已超出"think 路由"范畴。
+## 8. 真实流量数据佐证（远程实例 172.168.0.71:13456）
+
+读取用户实际在用的 ccm 实例 `/api/logs`（1400 条历史，tracing 开启）：
+
+| route_type | 数量 | 占比 |
+|:---:|---:|---:|
+| default | 1288 | **92%** |
+| think | 74 | 5.3% |
+| (res 条目未记录) | 38 err | — |
+
+被路由到 default 的请求中：model 主要是 `glm-5`（1324 条），少量
+`z-ai/glm-5.2`（38 条，且含 sub2api-cc 上游 502 错误）。
+
+think 命中的 74 条 model 也是 `glm-5` —— 说明远程 think target 映射的上游
+actual_model 也叫 glm-5（配置层面，非路由 bug）。
+
+**这证实了"大部分走 default"不是偶发，是稳定 92%。** think 命中的 74 条
+说明有客户端确实发顶层 thinking（`is_plan_mode` 能工作），但远少于 default。
+
+---
+
+## 9. 根因链（本地实证完整还原）
+
+`route()` 优先级（router/mod.rs L186）：**auto_map 在最前（优先级0）**，
+think 在第 6。两步顺序决定了根因：
+
+1. **auto_map 吃掉 think 信号** — 默认 `auto_map_regex = ^claude-`
+   （L96，None 时也回退此默认）。任何 `claude-3-5-sonnet-thinking` 这类
+   Claude 模型名在到达 think 规则前，已被 L191-198 重写为 default。
+   实测：`auto_map="^$"`（关）→ `model contains "thinking"` 规则命中
+   （route_type=prompt-rule）；`auto_map=""`（默认 ^claude-）→ 不命中。
+2. **is_plan_mode 只认顶层 thinking 字段** — 大部分 Claude Code 请求
+   不发顶层 `thinking` 对象（只有显式开 extended thinking 才发）→ think 路由
+   不触发。
+3. 两步叠加 → default 吃掉 92%。
+
+即：我们有一个比 CCR 强的通用 RouterRule 引擎，但 think 路由**没用它**（用了
+窄的 `is_plan_mode` 硬编码层），而本可补救的模型名规则又被 auto_map 在
+更早一步吃掉了信号。
+
+---
+
+## 10. 是否改代码 —— 倾向与建议
+
+### 不必须改代码的情况
+
+如果用户 think 用例就是"客户端显式发顶层 thinking"（远程 74 条命中即此），
+则现状 `is_plan_mode` 已够用。方向 A 的 condition 配方可让 think 走通用规则，
+但功能等价，只是架构更干净（可选）。
+
+### 值得改代码的情况
+
+**§6 路径陷阱**是真实 bug：`request.body.thinking.type`（带 body 前缀）
+在 fallback 不工作，必须用 `thinking.type`，与文档示例（全用 `request.body.*`）
+不一致，对用户是陷阱。修法二选一：
+
+- **修文档**（零代码）：config.example.toml / README 说明 model/messages/system
+  /tools 接受 `body.` 前缀，其余字段（thinking/temperature/metadata…）必须用
+  顶层路径。
+- **修代码**（让 `request.body.*` 对所有字段通用）：在 `resolve_path_value`
+  fallback 里，若首段是 `body` 且顶层无 `body` key，则跳过 `body` 段继续遍历。
+  让 `request.body.thinking.type` 也能命中。这是通用增强，非 think 专用。
+
+**auto_map 吃 think 信号**是设计权衡，非纯 bug：
+- 现状（auto_map 最前）：默认行为是把未知 claude-* 模型名归入 default，安全
+  但吃 think 信号。用户可显式设 `auto_map_regex = "^$"` 关掉。
+- 替代（auto_map 后移到 rules 之后）：能保住模型名 think 信号，但改变默认
+  行为，影响所有现有用户。
+
+### 推荐顺序
+
+1. **改文档澄清 §6 路径陷阱**（零风险，立即做）—— 值得。
+2. **可选：改代码让 fallback 支持 `request.body.*` 通用路径**（通用增强，
+   修一个对用户是坑的不一致）—— 值得，低风险。
+3. **不改 auto_map 顺序**（保持默认行为，文档说明如何关）—— 否则破坏
+   所有现有用户的默认行为。
+4. **不删 `is_plan_mode`**（保持 `[router].think` 向后兼容），但文档推荐
+   用方向 A 配方替代。
