@@ -166,9 +166,14 @@ condition 永不命中。正确路径是 `thinking.type`（去掉 `body.`）。
 实证：`left = "request.body.thinking.type"` → 不命中（route_type=default）；
 `left = "thinking.type"`（或 `request.thinking.type`，strip 前缀后同）→ 命中。
 
-**config.example.toml 示例全用 `request.body.model`，但那是靠特判（L448），
-不是 fallback。对 model/messages/system/tools 之外的任何字段（thinking、
-temperature、metadata…），必须用无 `body.` 前缀的顶层路径。这是文档应澄清的点。**
+**已修复（②）**：`resolve_path_value` fallback 现在会跳过开头的 `body` 段
+（router/mod.rsFallback 注释），让 `request.body.thinking.type` 等价于
+`request.thinking.type`。新增单元测试
+`test_resolve_path_supports_body_prefix_for_arbitrary_fields` 覆盖三种写法
+（裸、`body.`、`request.body.`）均命中 + disabled 负例不命中。
+
+**文档已澄清（①）**：config.example.toml 加了"Path convention"说明块与
+think 配方 Example 3，明确 `body.` 前缀对顶层任意字段被容忍并剥离。
 
 ---
 
@@ -247,29 +252,21 @@ think 在第 6。两步顺序决定了根因：
 
 ### 值得改代码的情况
 
-**§6 路径陷阱**是真实 bug：`request.body.thinking.type`（带 body 前缀）
-在 fallback 不工作，必须用 `thinking.type`，与文档示例（全用 `request.body.*`）
-不一致，对用户是陷阱。修法二选一：
+**§6 路径陷阱**（已修复 ②）—— fallback 对 `request.body.<非特判字段>` 不工作。
+选择修代码（通用增强）：`resolve_path_value` fallback 跳过开头 `body` 段，
+让 `request.body.thinking.type` ≡ `request.thinking.type`。新增单元测试覆盖。
+同时修文档（①）：config.example.toml 澄清路径约定 + 加 think 配方 Example 3。
 
-- **修文档**（零代码）：config.example.toml / README 说明 model/messages/system
-  /tools 接受 `body.` 前缀，其余字段（thinking/temperature/metadata…）必须用
-  顶层路径。
-- **修代码**（让 `request.body.*` 对所有字段通用）：在 `resolve_path_value`
-  fallback 里，若首段是 `body` 且顶层无 `body` key，则跳过 `body` 段继续遍历。
-  让 `request.body.thinking.type` 也能命中。这是通用增强，非 think 专用。
+**auto_map 吃 think 信号**是设计权衡，保持不改（③）：
+- 现状（auto_map 最前，默认 `^claude-`）：把未知 claude-* 模型名归入 default，
+  安全但吃 think 信号。用户可显式设 `auto_map_regex = "^$"` 关掉。
+- 后移到 rules 之后能保住信号但破坏所有现有用户的默认行为，故不动。
+  文档已说明如何关（本节 + config.example.toml 注释）。
 
-**auto_map 吃 think 信号**是设计权衡，非纯 bug：
-- 现状（auto_map 最前）：默认行为是把未知 claude-* 模型名归入 default，安全
-  但吃 think 信号。用户可显式设 `auto_map_regex = "^$"` 关掉。
-- 替代（auto_map 后移到 rules 之后）：能保住模型名 think 信号，但改变默认
-  行为，影响所有现有用户。
+### 已做 / 不做的总结
 
-### 推荐顺序
-
-1. **改文档澄清 §6 路径陷阱**（零风险，立即做）—— 值得。
-2. **可选：改代码让 fallback 支持 `request.body.*` 通用路径**（通用增强，
-   修一个对用户是坑的不一致）—— 值得，低风险。
-3. **不改 auto_map 顺序**（保持默认行为，文档说明如何关）—— 否则破坏
-   所有现有用户的默认行为。
-4. **不删 `is_plan_mode`**（保持 `[router].think` 向后兼容），但文档推荐
-   用方向 A 配方替代。
+- ✅ ① 改文档澄清路径陷阱（config.example.toml "Path convention" + Example 3）。
+- ✅ ② 修代码让 fallback 支持 `request.body.*` 通用（+ 单元测试）。
+- ✅ ④ 不删 `is_plan_mode`（保持 `[router].think` 向后兼容），文档推荐方向 A
+  配方替代。
+- ❄️ ③ 不动 auto_map 顺序（保持默认行为，文档说明如何关）。

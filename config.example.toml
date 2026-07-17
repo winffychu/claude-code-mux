@@ -215,6 +215,35 @@ model = "glm-4.6"
 # # Optional match condition for array operations.
 # # match = "some-array-element"
 
+# Path convention for `left` / `key`:
+#   - `request.body.model`, `request.body.messages`, `request.body.system`,
+#     `request.body.tools` — recognized (legacy convention). The `body.` prefix
+#     is optional; `request.model` works the same.
+#   - ALL OTHER top-level fields (e.g. `request.body.thinking.type`,
+#     `request.body.temperature`, `request.body.metadata`) — the `body.` prefix
+#     is tolerated and stripped (the serialized request has no `body` wrapper),
+#     so `request.body.thinking.type` resolves identically to `request.thinking.type`.
+#   - Nested array access: `request.body.messages.0.content` (messages/system/
+#     tools have special handling) or any JSON path like `request.lifecycle` via
+#     the generic fallback.
+#
+# Example 3: Route extended-thinking requests via a condition rule.
+# This is the recommended replacement for `[router] think = "..."` — it uses
+# the generic RouterRule engine (same signal: top-level `thinking.type == "enabled"`),
+# so you get the same behaviour without the dedicated plan-mode hardcode,
+# and you can combine it with thresholds or more conditions. See
+# docs/think-routing.md for the full analysis.
+# [[router.rules]]
+# id = "route-thinking"
+# name = "Route extended-thinking requests to think model"
+# type = "condition"
+# left = "request.body.thinking.type"
+# operator = "=="
+# right = "enabled"
+# model = "think-target-model"
+# # Optional: only route thinking requests above a token threshold.
+# # threshold = 50_000
+
 # =============================================================================
 # [[providers]] — AI provider configuration
 # =============================================================================

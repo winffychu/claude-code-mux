@@ -487,10 +487,26 @@ impl Router {
             return serde_json::to_value(&request.tools).ok();
         }
 
-        // Fallback: serialize the whole request and navigate
+        // Fallback: serialize the whole request and navigate.
+        //
+        // Path convention: top-level AnthropicRequest fields are at the JSON
+        // root (model, messages, thinking, temperature, …) with NO "body"
+        // wrapper.  Earlier special-cased paths (model/messages/system/tools)
+        // already accept an optional `body.` prefix by hand, so for arbitrary
+        // fields reached via this fallback we likewise tolerate a leading
+        // `body.` segment by skipping it (the serialized request has no `body`
+        // key, so `body.<field>` would otherwise never resolve).  This lets
+        // users write `request.body.thinking.type` consistently with the
+        // model-prefix examples that all use the `request.body.*` convention.
         let body = serde_json::to_value(request).ok()?;
+        // Drop a leading "body" segment so `body.thinking.type` ≡ `thinking.type`.
+        let nav_parts: Vec<&str> = if parts.first().map(|p| *p == "body").unwrap_or(false) {
+            parts[1..].to_vec()
+        } else {
+            parts.clone()
+        };
         let mut current = &body;
-        for part in parts {
+        for part in nav_parts {
             // Try as object key first
             if let Ok(part_as_num) = part.parse::<usize>() {
                 if let Some(arr) = current.as_array() {
@@ -1012,6 +1028,59 @@ mod tests {
         let decision = router.route(&mut request).unwrap();
         assert_eq!(decision.route_type, RouteType::Think);
         assert_eq!(decision.model_name, "think.model");
+    }
+
+    #[test]
+    fn test_resolve_path_supports_body_prefix_for_arbitrary_fields() {
+        // Regression for §6 path pitfall: `request.body.thinking.type` (with the
+        // `body.` prefix, matching the convention used by all config.example.toml
+        // examples) must resolve via the fallback, the same as the bare
+        // `thinking.type` path. The serialized AnthropicRequest has no `body`
+        // wrapper, so the fallback must skip a leading `body` segment.
+
+        fn make_rule(left: &str) -> RouterRule {
+            make_condition_rule(RuleOperator::Eq, left, "enabled", "think.model")
+        }
+
+        // Bare path (no `body.`) — always worked.
+        let mut req = create_simple_request("plan");
+        req.thinking = Some(ThinkingConfig {
+            r#type: "enabled".to_string(),
+            budget_tokens: Some(8_000),
+        });
+        assert_eq!(route_with_rule(make_rule("thinking.type"), &mut req), "think.model");
+
+        // `body.`-prefixed path — must now resolve equivalently (§6 fix).
+        let mut req = create_simple_request("plan");
+        req.thinking = Some(ThinkingConfig {
+            r#type: "enabled".to_string(),
+            budget_tokens: Some(8_000),
+        });
+        assert_eq!(route_with_rule(make_rule("body.thinking.type"), &mut req), "think.model");
+
+        // `request.` + `body.` prefixed — same after stripping the `request.` prefix.
+        let mut req = create_simple_request("plan");
+        req.thinking = Some(ThinkingConfig {
+            r#type: "enabled".to_string(),
+            budget_tokens: Some(8_000),
+        });
+        assert_eq!(
+            route_with_rule(make_rule("request.body.thinking.type"), &mut req),
+            "think.model"
+        );
+
+        // Negative: disabled thinking must NOT match either path.
+        let mut req = create_simple_request("hi");
+        req.thinking = Some(ThinkingConfig {
+            r#type: "disabled".to_string(),
+            budget_tokens: None,
+        });
+        // auto_map disabled (^$) in route_with_rule, so model stays the original
+        // — not think.model.
+        assert_ne!(
+            route_with_rule(make_rule("body.thinking.type"), &mut req),
+            "think.model"
+        );
     }
 
     #[test]
