@@ -280,6 +280,7 @@ async fn get_config_json(State(state): State<Arc<AppState>>) -> impl IntoRespons
             "background_regex": inner.config.router.background_regex,
             "prompt_rules": inner.config.router.prompt_rules,
             "rules": inner.config.router.rules,
+            "cost_first": inner.config.router.cost_first,
         },
         "providers": inner.config.providers,
         "models": inner.config.models,
@@ -385,6 +386,17 @@ async fn update_config_json(
                 }
                 None => {
                     router_table.remove("long_context_threshold");
+                }
+            }
+
+            // cost_first is a bool — false is a valid value, only update when
+            // the key is explicitly present in the incoming config. Absent key
+            // leaves the existing on-disk value untouched (do NOT remove, since
+            // removing also maps to the serde default false but a stray toggle
+            // reload should not wipe a user-edited value).
+            if let Some(val) = router.get("cost_first") {
+                if let Some(b) = val.as_bool() {
+                    router_table.insert("cost_first".to_string(), toml::Value::Boolean(b));
                 }
             }
         }

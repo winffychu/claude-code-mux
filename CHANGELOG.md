@@ -25,7 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Router autoSave: localStorage only; 💾 Save button syncs to server + hot-reload
-- Routing order: auto-map → websearch → background → subagent → router.rules → prompt_rules → think → long_context → default
+- Routing order now switchable via `cost_first` (default `false`):
+  - `cost_first = false` (default — think-first, matches upstream 9j): auto-map → websearch → subagent → think → background → router.rules → prompt_rules → long_context → default
+  - `cost_first = true` (cost-first, matches elidickinson fork): auto-map → websearch → background → subagent → router.rules → prompt_rules → think → long_context → default
 - `update_config_json`: `tokio::fs::write` (async, non-blocking) instead of `std::fs::write`
 - RwLock poison recovery: `unwrap_or_else(|e| e.into_inner())` on all lock sites
 - `openai.rs:769`: `.expect()` → `match` returning error response (no panic on empty choices)

@@ -73,7 +73,10 @@ omit_system_prompt = true
 # [router] — Routing configuration
 # =============================================================================
 # Controls how incoming requests are routed to models.
-# Routing priority order:
+# Routing priority order (default, cost_first = false = think-first):
+#   auto-map  →  websearch  →  subagent  →  think  →  background
+#            →  router.rules  →  prompt_rules  →  long_context  →  default
+# Set cost_first = true below to switch to the elidickinson cost-first order:
 #   auto-map  →  websearch  →  background  →  subagent  →  router.rules
 #            →  prompt_rules  →  think  →  long_context  →  default
 [router]
@@ -116,6 +119,14 @@ default = "minimax-m2"
 # Matched against the ORIGINAL model name (before auto-mapping).
 # Empty/null = defaults to `(?i)claude.*haiku`.
 # background_regex = "(?i)claude.*haiku"
+
+# Cost-first vs think-first routing priority switch (default: false).
+#   false = think-first (matches upstream 9j): user-explicit `thinking.type=enabled`
+#          wins over background detection. Haiku+thinking → think.
+#   true  = cost-first (matches elidickinson fork, commit 8c1b65a): background
+#          detection hijacks the request before think. Haiku+thinking → background.
+# Leave commented out to use the think-first default (recommended for most users).
+# cost_first = false
 
 # -----------------------------------------------------------------------------
 # [[router.prompt_rules]] — Prompt-based routing (first match wins)

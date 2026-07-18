@@ -174,15 +174,23 @@ impl Router {
 
     /// Route an incoming request to the appropriate model
     ///
-    /// Priority order (highest to lowest):
-    /// 1. WebSearch - tool-based detection (web_search tool present)
-    /// 2. Subagent - CCM-SUBAGENT-MODEL tag in system prompt
-    /// 3. Think - Plan Mode / reasoning enabled  [B-experiment: restored to upstream 9j order]
-    /// 4. Background - model name regex match (e.g., haiku) - checked AFTER Think (9j semantic)
-    /// 5. Router Rules - condition + model-prefix matching with rewrites
-    /// 6. Prompt Rules - regex pattern matching on user prompt
-    /// 7. Long Context - token count exceeds threshold (long_context model)
-    /// 8. Default - auto-mapped or original model name
+    /// Priority order (highest to lowest). WebSearch, AutoMap and Default
+    /// run in both modes unchanged; the middle layers reorder by `cost_first`:
+    ///
+    /// `cost_first = false` (default — think-first, matches upstream 9j):
+    ///   1. WebSearch  2. Subagent  3. Think  4. Background  5. Router Rules
+    ///   6. Prompt Rules  7. Long Context  8. Default
+    ///   user-explicit `thinking.type=enabled` wins over Background (haiku +
+    ///   thinking → Think, not hijacked by Background).
+    ///
+    /// `cost_first = true` (cost-first, matches elidickinson `8c1b65a`):
+    ///   1. WebSearch  2. Background  3. Subagent  4. Router Rules
+    ///   5. Prompt Rules  6. Think  7. Long Context  8. Default
+    ///   background detection hijacks thinking requests matching the
+    ///   background_regex. Use when `claude-haiku-*` should always be cheap
+    ///   background regardless of user thinking intent.
+    ///
+    /// See docs/think-routing.md §11 for full archaeology + rationale.
     pub fn route(&self, request: &mut AnthropicRequest) -> Result<RouteDecision> {
         // Save original model for background task detection
         let original_model = request.model.clone();

@@ -1433,6 +1433,35 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                             </div>
                         </div>
 
+                        <!-- Cost-First vs Think-First Priority Toggle -->
+                        <div class="card">
+                            <h2 class="text-xl font-bold mb-4">
+                                <span data-i18n="label.cost_first">Cost-First Routing</span>
+                            </h2>
+                            <p class="text-gray-600 mb-6" data-i18n="label.cost_first_desc">
+                                When enabled, background detection runs before
+                                think routing (elidickinson cost-first). When
+                                disabled (default), user-explicit thinking wins
+                                over background (matches upstream 9j).
+                            </p>
+                            <div class="flex items-center space-x-3">
+                                <input
+                                    id="cost-first"
+                                    type="checkbox"
+                                    class="w-5 h-5"
+                                />
+                                <label
+                                    for="cost-first"
+                                    class="text-sm font-medium text-gray-700"
+                                    data-i18n="label.cost_first_enable"
+                                    >Enable cost-first (background hijacks thinking requests)</label>
+                            </div>
+                            <p class="text-sm text-gray-500 mt-2"
+                               data-i18n="label.cost_first_hint">
+                                Haiku + thinking.type=enabled: off → think model (upstream 9j); on → background model (elidickinson fork).
+                            </p>
+                        </div>
+
                         <!-- OAuth Tokens Management -->
                         <div class="card">
                             <h2 class="text-xl font-bold mb-4" data-i18n="label.oauth_tokens">OAuth Tokens</h2>
@@ -2330,6 +2359,12 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                     document.getElementById("background-regex");
                 if (backgroundRegexInput) {
                     backgroundRegexInput.value = router.background_regex || "";
+                }
+
+                // Load cost-first toggle
+                const costFirstToggle = document.getElementById("cost-first");
+                if (costFirstToggle) {
+                    costFirstToggle.checked = !!router.cost_first;
                 }
 
                 // Load tracing toggle
@@ -3397,6 +3432,18 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                                 } else {
                                     delete appState.config.router
                                         .background_regex;
+                                }
+
+                                // cost-first toggle — bool, false is a valid
+                                // value (do NOT delete on off). Always write
+                                // the explicit bool so update_config_json
+                                // persists it.
+                                const costFirstToggle = document.getElementById(
+                                    "cost-first",
+                                );
+                                if (costFirstToggle) {
+                                    appState.config.router.cost_first =
+                                        costFirstToggle.checked;
                                 }
 
                                 // Save to localStorage only — user clicks 💾 Save

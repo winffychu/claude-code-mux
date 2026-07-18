@@ -24,11 +24,11 @@ think，用户必须 inline route 或手配 `model-prefix` 规则。
 
 ### CCM (我们) 现状
 
-`router/mod.rs::route()` 优先级（L186-300）：
+`router/mod.rs::route()` 优先级（L186-310，**`cost_first=true` 模式**；默认 `cost_first=false` 见本文件 §11.12）：
 
 ```
 0. auto_map_regex   （模型名正则 → default 重写，最先）
-1. webSearch        （tools 含 web_search）
+1. webSearch        （tools 含 web_search，两种模式相同）
 2. background       （模型名 regex 匹配 haiku 等，成本优化前置）
 3. subagent         （system prompt 含 CCM-SUBAGENT-MODEL）
 4. router rules     （RouterRule condition + model-prefix，regex+$ref）★
@@ -36,6 +36,13 @@ think，用户必须 inline route 或手配 `model-prefix` 规则。
 6. think           （is_plan_mode：顶层 thinking.type=="enabled"）
 7. long context     （token_count >= threshold）
 8. default          （auto-mapped 或原模型名）
+```
+
+默认 `cost_first=false`（think-first，匹配上游 9j）顺序为：
+
+```
+0. auto_map_regex → 1. webSearch → 2. subagent → 3. think → 4. background
+  → 5. router rules → 6. prompt rules → 7. long context → 8. default
 ```
 
 **我们的 RouterRule（优先级 4）比 CCR 强**：支持 **regex 匹配**（CCR inline
@@ -60,7 +67,7 @@ route 只字符串前缀）+ **`$ref` 复用**规则块。
 
 ### 根因
 
-`is_plan_mode`（router/mod.rs L579-585）只认一个条件：
+`is_plan_mode`（router/mod.rs L686）只认一个条件：
 
 ```rust
 fn is_plan_mode(&self, request: &AnthropicRequest) -> bool {
@@ -150,12 +157,12 @@ thinking.type=="enabled"），RouterRule 方案做同样的事但不需专用代
 
 ## 6. 路径陷阱 —— request.body.* vs 顶层字段
 
-`resolve_path_value`（router/mod.rs L444）的路径解析逻辑：
+`resolve_path_value`（router/mod.rs L525）的路径解析逻辑：
 
 1. **特判**：`model` / `body.model`、`messages` / `body.messages`、
    `messages.<n>.content`、`system` / `body.system`、`tools` / `body.tools`
    → 这些接受带或不带 `body.` 前缀。
-2. **fallback**（L490-505）：把整个 `AnthropicRequest` 序列化成 JSON Value，
+2. **fallback**（L~570-590）：把整个 `AnthropicRequest` 序列化成 JSON Value，
    再按 `path.split('.')` 逐段 `get()` 遍历。
 
 **陷阱**：fallback 序列化后的 JSON 顶层**没有 `body` 包裹**
@@ -404,7 +411,7 @@ L1151），用 `model="claude-haiku-4-5"` + `thinking.type=enabled`，**pin**
 | 7 | Long Context |
 | 8 | Default |
 
-- 单元测试：258 passed 0 failed，无回归（既有测试用 `claude-opus-4` 等非
+- 单元测试：当时 258 passed 0 failed，无回归（既有测试用 `claude-opus-4` 等非
   haiku 模型不受重排影响）。
 - 守护测试 `test_think_vs_background_when_model_is_claude_haiku` 的断言
   从 `RouteType::Background` 改为 `RouteType::Think`，pin 修正后的行为。
@@ -441,7 +448,7 @@ L1151），用 `model="claude-haiku-4-5"` + `thinking.type=enabled`，**pin**
 | `claude-* + thinking=enabled` + 配有匹配 `claude` prefix 的 Router Rule | Router Rule 命中（Rules@4 先于 Think@6）→ 走 rule-target-model | **Think 命中**（Think@3 先于 Rules@5）→ 走 think model |
 | `claude-* + thinking=None` + 同 Router Rule | Router Rule 命中 | Router Rule 仍命中（无 thinking 时 Think 不触发） |
 
-单元测试验证（258→267 passed）：
+单元测试验证（当时 258→267 passed，现 271 passed）：
 - `test_think_now_beats_router_rule_when_both_match` — pin B 下 think 抢占
   Router Rule 的新行为（断言 Think, 注释明确"old fork behaviour would have
   returned PromptRule + rule-target.model"）。
@@ -496,7 +503,7 @@ C. **加 `request.thinking.type` 这种 condition 让用户用 Rule 显式判断
 - **elidickinson 纯净** (`/tmp/eli-test`): D 测试实测走
   `🔄 Routing to background model` ❌ **回归是 elidickinson 原生引入**,
   与我们引入的 Router Rules/LongContext 完全无关
-- **我们 B 实施后** (`/opt/data/home/ccm` HEAD=`b6ae1a9`): D 测试走
+- **我们 B 实施后** (`/opt/data/home/ccm` HEAD=`2e8db1a` feat(router): add cost_first): D 测试走
   think ✅ — B 修了 elidickinson 原生回归
 
 **elidickinson 历史考古**（commit message 原文）:
