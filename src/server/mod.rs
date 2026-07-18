@@ -267,6 +267,7 @@ async fn get_config_json(State(state): State<Arc<AppState>>) -> impl IntoRespons
                 "enabled": inner.config.server.tracing.enabled,
                 "path": inner.config.server.tracing.path,
                 "omit_system_prompt": inner.config.server.tracing.omit_system_prompt,
+                "max_entries": inner.config.server.tracing.max_entries,
             },
         },
         "router": {
@@ -408,6 +409,7 @@ async fn update_config_json(
             update_tracing_field(&mut config, "enabled", tracing.get("enabled"));
             update_tracing_field(&mut config, "path", tracing.get("path"));
             update_tracing_field(&mut config, "omit_system_prompt", tracing.get("omit_system_prompt"));
+            update_tracing_field(&mut config, "max_entries", tracing.get("max_entries"));
         }
     }
 
@@ -469,6 +471,16 @@ fn update_tracing_field(
                 if let Some(b) = val.as_bool() {
                     tracing_table.insert("omit_system_prompt".to_string(), toml::Value::Boolean(b));
                 }
+            }
+        }
+        "max_entries" => {
+            if let Some(val) = value {
+                if let Some(n) = val.as_u64() {
+                    tracing_table.insert("max_entries".to_string(), toml::Value::Integer(n as i64));
+                }
+            } else if value.is_none() {
+                // Keep default (2000) if removed; do not delete the key so
+                // reopening still shows a sane value.
             }
         }
         _ => {}

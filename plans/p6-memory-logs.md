@@ -145,11 +145,14 @@ let stream = async_stream::stream! { ... }  // 或 unfold
 | `src/message_tracing/mod.rs` | 加 RingBuffer + broadcast；重写 new/trace_*/read_recent/subscribe | ~+120 / -50 |
 | `src/message_tracing/mod.rs` | `trace_path()` 语义改为"返回文件路径（仅供状态）"，不再 flush | ~改 |
 | `src/server/logs.rs` | `get_logs`→`read_recent`；`stream_logs`→`broadcast::subscribe` | ~+30 / -80 |
+| `src/server/mod.rs` | `get_config_json` + `update_config_json` + `update_tracing_field` 三处同步暴露 `tracing.max_entries` 字段 | +8（2026-07-18 R7 多步审计发现/补修）|
 | `config.example.toml` | 注释加 `max_entries` 说明 | +3 |
 | `README.md` | tracing 段落更新（内存为主，文件可选） | +改 |
 | `src/server/i18n/{en,zh-CN}.json` | logs.description 文案微调（"来自 trace.jsonl"→"最近请求追踪"） | +2 |
 
 合计约 +160 / -130，净增 ~30 行。
+
+> **2026-07-18 P6 真机 e2e 复验补注**：进入 R7 阶段审计确认 P6 commit `6b877af` 真机行为 + 顺带发现并修复 `get_config_json`/`update_config_json`/`update_tracing_field` 三处漏 `max_entries` 字段同步偏差（admin UI 调出/保存时缺 max_entries 字段）。真机 e2e：3 真实 LLM 请求 → `/api/logs` 即时返回 8 entries / tracing_enabled:true；`/api/logs/stream` SSE backlog + live broadcast 实测推送 10 条 data event；POST `/api/config/json` + `/api/reload` round-trip 把 max_entries 2000→500 e2e 通过。
 
 ### 风险
 
