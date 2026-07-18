@@ -175,6 +175,25 @@ let stream = async_stream::stream! { ... }  // 或 unfold
 | 集成 文件可选不冲突 | path 配置时文件仍正确写 |
 | 245 既有测试保持 | 无退化 |
 
+### 4.1 日志语义（已知行为说明，非 bug）
+
+下列两条在 P6 实施后的真机审计中发现，经确认为**设计权衡**而非缺陷：
+
+- **fallback 链每尝试一个 provider mapping 就记一条 `req` trace 条目**：
+  `trace_request` 在 `src/server/mod.rs` 的 fallback for 循环内调用（L647
+  OpenAI 端点、L923 Anthropic 端点），与 stdout `info!` 的 `[n/N]` 重试
+  标记同步——记录每次 fallback 尝试的 actual_model，便于排查"哪个上游
+  被尝试、哪个成功/失败"。`/api/logs` 的 `total` 是**trace 条目数**
+  而非请求数；前端按 `trace_id` 去重才是请求数。
+- **`err` LogEntry 的 model/provider/route_type 为 None**：`trace_error`
+  只收 `id` + `error` 两参（`message_tracing/mod.rs` L337）。依赖 `id`
+  软关联回同 id 的 `req` 条目可看到完整路由链——`read_recent` 支持
+  `?id=<trace_id>` 过滤是此设计的配套。这是"日志条目轻量化"的权衡，
+  与 p6 §1.3"`trace.jsonl` 存完整体、内存 LogEntry 只存精简字段"一致。
+
+若未来要在 err 行直接显示 model/provider/route_type，需给 `trace_error`
+扩展可选三参；属改进项，非 P6 范围。
+
 ---
 
 ## 5. 关联：Think 路由文档（用户要求"留文档"）

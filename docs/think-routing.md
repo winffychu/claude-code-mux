@@ -202,52 +202,107 @@ model = "think-target-model"
 
 ## 8. 真实流量数据佐证（远程实例 172.168.0.71:13456）
 
-读取用户实际在用的 ccm 实例 `/api/logs`（分页拉取 2015 条历史，tracing 开启）：
+**修正（2026-07-18）**：本节原始内容基于"远程无 `/api/config` 端点、SSH 不通
+则逆向推断"，**不准确**。从 `src/server/mod.rs` 路由表（L159）确认远程实际
+暴露了 `GET /api/config/json` 端点，可直接读真实配置。以下按真配置回写。
 
-| route_type | 数量 | 占比 |
-|:---:|---:|---:|
-| default | 1890 | **93.8%** |
-| think | 74 | 3.7% |
-| error(502) | 51 | 2.5% |
+### 8.1 真实配置（`GET /api/config/json` 直读）
 
-**远程配置轮廓（从行为逆向推断，因远程无 /api/config 端点且 SSH 不通）**：
+```
+[router] default=claude-haiku-4-5, think=claude-haiku-4-5, websearch=deepseek-v4-flash,
+         long_context=deepseek-v4-pro (threshold=202000),
+         auto_map_regex=null → 回退默认 ^claude-,
+         background_regex=null → 回退默认 (?i)claude.*haiku,
+         rules=[], prompt_rules=[]
+[providers] sub2api-cc(anthropic,172.168.0.83:58083), nvidia(openai,172.168.0.82:3001),
+            agnes-ai(openai,apihub.agnes-ai.com)
+[models] 5 个; claude-haiku-4-5 有 5 条 mappings fallback:
+          1: sub2api-cc→glm-5, 2: nvidia→z-ai/glm-5.2, 3: nvidia→deepseek-v4-pro,
+          4: sub2api-cc→deepseek-v4-pro, 5: agnes-ai→agnes-2.0-flash
+```
 
-- **provider × model**：
-  - `sub2api-cc` —— actual_model `glm-5`（default & think 同一 target）
-  - `nvidia` —— actual_model `z-ai/glm-5.2`
-- **router**：`default = glm-5`，`think = glm-5`（think 同 default，
-  命中 74 条但不换模型 → 思考路由在此实例无实际意义）。
-- **无 `[router.rules]` condition / 无 prompt_rules** —— route_type
-  字段从未出现 `prompt-rule` / `long-context` / `web-search`，think 全靠
-  `[router] think` 硬编码（即 `is_plan_mode`）命中。
-- **auto_map 默认 `^claude-`** —— `z-ai/glm-5.2` 不以 `claude-` 开头故不被吃，
-  保留原名走 default（52 条 nvidia + 1840 条 sub2api-cc glm-5 = default 1890）。
+### 8.2 真实流量分布（`GET /api/logs`）
 
-**疑似配置问题**：51 条 502 错误全是 `z-ai/glm-5.2` via `sub2api-cc`（上游
-报 `Upstream request failed`），但同一 actual_model `z-ai/glm-5.2` 经由
-`nvidia` 的 52 条无误 → `glm-5.2` 的 mappings fallback chain 把 sub2api-cc
-排在 nvidia 之前，而 sub2api-cc 在该模型上不可用。
+> ⚠️ **count 口径警告**: `/api/logs` 的一个请求经 fallback 链会触发**多条**
+> `req` 条目（每个 provider mapping attempt 一条 `trace_request`，见 §8.4），
+> 所以 `total` 是"trace 条目数"而非"请求数"。统计占比应按 `id` 去重。
+
+抽样 50 条（remote ring buffer 最新）：`route_type=default` 占绝大多数，`model`
+为 `glm-5`（actual_model，经 sub2api-cc 转发）。
+
+### 8.3 为何大部分走 default —— 真实根因（修正 §9）
+
+远程客户端发往 ccm 的 `request.body.model` 是 **`glm-5`**（已是 actual_model，
+不是 `claude-haiku-4-5` 这种路由名）。又因远程 `[router] default=think=claude-haiku-4-5`
+但 `claude-haiku-4-5` 的 mappings fallback 第一名是 `sub2api-cc→glm-5`——
+即一个发 `glm-5` 的请求也被（auto_map 不触发，因为 `glm-5` 不匹配 `^claude-`）
+直接落 default 路由，再经 mapping 转发到 sub2api-cc→glm-5 actual。
+
+换言之，远程"92% default"的真根因是 **客户端直接发 actual_model 名（`glm-5`）**，
+既不触发 auto_map，也不触发 think（无顶层 `thinking`）、long_context、websearch。
+**§9 的"auto_map 吃掉 think 信号"在此真实配置下不适用**——因为客户端压根
+不发 `claude-*` 模型名。
+
+### 8.4 相关行为（非缺陷，已确认是设计）
+
+- **fallback 每次 attempt 在 `/api/logs` 各记一条 `req`**：`src/server/mod.rs`
+  L647/OpenAI 端点、L923/Anthropic 端点的 `trace_request` 在 fallback for 循环
+  内，每 mapping flag 一条。这与 stdout `info!`（L599 `retry_info=[n/N]`）
+  一致——日志和终端**都正确反映每次 fallback 链路**，可观测，非 bug。
+- **err 条目在 `/api/logs` 丢了 model/provider/route_type**（`trace_error`
+  `src/message_tracing/mod.rs` L337-361 把这些字段置 None）：影响为网页
+  err 行无内联路由详情；但 `read_recent` 支持 `?id=<trace_id>` 过滤，前端按
+  trace id 查询能看到同 id 的 req entry 完整链路，所以影响有限。
+  非本轮处理范围。
+- **`claude-haiku-4-5` 会被 `background_regex` 默认 `(?i)claude.*haiku` 命中**→
+  route_type=background。但远程客户端发 `glm-5` 不命中此正则，故远程日志
+  从未出现 background 分类。
+
+### 8.5 真实上游 502 来源
+
+远程历史里 `z-ai/glm-5.2` 相关 502 是 `claude-haiku-4-5` fallback chain
+第 2 位（nvidia→`z-ai/glm-5.2`）尝试失败而后续 mapping 成功的真实上游故障。
+fallback chain 本身工作正常（会继续尝试第 3-5 位并成功），**非配置错误**。
 
 ---
 
-## 9. 根因链（本地实证完整还原）
+## 9. 根因链（本地实证 + 真实配置修正）
 
 `route()` 优先级（router/mod.rs L186）：**auto_map 在最前（优先级0）**，
-think 在第 6。两步顺序决定了根因：
+think 在第 6。
 
-1. **auto_map 吃掉 think 信号** — 默认 `auto_map_regex = ^claude-`
-   （L96，None 时也回退此默认）。任何 `claude-3-5-sonnet-thinking` 这类
-   Claude 模型名在到达 think 规则前，已被 L191-198 重写为 default。
-   实测：`auto_map="^$"`（关）→ `model contains "thinking"` 规则命中
+### 9.1 理论路径（若客户端发 `claude-*` 模型名）
+
+1. **auto_map 可能吃掉 think 信号** —— 默认 `auto_map_regex = ^claude-`
+   （None 时也回退此默认，L96）。`claude-3-5-sonnet-thinking` 这类
+   Claude 模型名在到达 think 规则前会被 L191-198 重写为 default。
+   本地实测：`auto_map="^$"`（关）→ `model contains "thinking"` 规则命中
    （route_type=prompt-rule）；`auto_map=""`（默认 ^claude-）→ 不命中。
-2. **is_plan_mode 只认顶层 thinking 字段** — 大部分 Claude Code 请求
-   不发顶层 `thinking` 对象（只有显式开 extended thinking 才发）→ think 路由
-   不触发。
-3. 两步叠加 → default 吃掉 92%。
+2. **is_plan_mode 只认顶层 thinking 字段** —— 客户端不发顶层 `thinking`
+   对象 → think 路由不触发。
 
-即：我们有一个比 CCR 强的通用 RouterRule 引擎，但 think 路由**没用它**（用了
-窄的 `is_plan_mode` 硬编码层），而本可补救的模型名规则又被 auto_map 在
-更早一步吃掉了信号。
+### 9.2 真实配置下的实际路径（远程 172.168.0.71）
+
+远程客户端发 `request.body.model = glm-5`**（actual_model 名）**：
+
+1. `glm-5` 不匹配 `^claude-` → **auto_map 不触发**（9.1 此处不适用）
+2. 不匹配 `(?i)claude.*haiku` → background 不触发
+3. 无顶层 thinking → think 不触发
+4. 直接落 **default** 路由（路由名 `claude-haiku-4-5`），再经 mappings
+   fallback 转到 actual `glm-5` (priority 1 sub2api-cc)
+
+**故§9.1 的"auto_map 吃信号"在远程真配置下不是主因**——主因是客户端
+直接发 actual_model 名，跳过了所有路由分类层。think 路由 74 条命中是
+少部分客户端显式发顶层 `thinking` 的情况。
+
+### 9.3 结论
+
+"大部分走 default"有两个独立成因：
+- **9.1 路径**（claude-* 客户端）：auto_map 提前吃掉信号 + is_plan_mode 过窄
+- **9.2 路径**（actual-model 客户端，远程真实情况）：客户端根本不走路由分类
+
+要减少 default，**必须知道客户端发什么 model**——若发 actual_model，路由层
+怎么扩 think 检测都没用（§4 方向 A 也救不了，因为信号在 model 名而非 routing field）。
 
 ---
 

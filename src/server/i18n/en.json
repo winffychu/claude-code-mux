@@ -163,7 +163,7 @@
   "toast.tracing_disabling": "Disabling tracing...",
   "heading.request_logs": "Request Logs",
   "logs.description": "Recent request traces (in-memory buffer, newest first)",
-  "logs.tracing_off_warning": "⚠️ Tracing is not enabled. Enable it in Settings ([tracing] enabled = true) to start collecting logs.",
+  "logs.tracing_off_warning": "⚠️ Tracing is not enabled. Enable it in Settings ([server.tracing] enabled = true) to start collecting logs.",
   "logs.filter_all": "All directions",
   "logs.filter_req": "Requests (req)",
   "logs.filter_res": "Responses (res)",
