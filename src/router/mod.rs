@@ -1149,6 +1149,58 @@ mod tests {
         assert_eq!(decision.route_type, RouteType::Think); // Think wins
     }
 
+    /// Fork regression guard (vs upstream 9j): when the client sends a
+    /// `claude-haiku-*` model name together with `thinking.type == "enabled"`,
+    /// upstream `9j/claude-code-mux` routes to **Think** (think@3, background@4),
+    /// but this fork routes to **Background** — the `elidickinson` fork moved
+    /// Background ahead of Think (checked early "to save costs"), and this
+    /// fork inherited that ordering (see docs/think-routing.md §11).
+    ///
+    /// `create_simple_request` uses `claude-opus-4`, which does NOT match the
+    /// default `(?i)claude.*haiku` regex, so `test_routing_priority` above
+    /// passes *without* exercising the haiku path. This guard pins the actual
+    /// fork behaviour so the divergence from upstream is explicit and
+    /// detectable, and so any future reorder is forced to update this test.
+    #[test]
+    fn test_think_vs_background_when_model_is_claude_haiku() {
+        let config = create_test_config();
+        let router = Router::new(config);
+
+        // Use a model name that matches the default background_regex (?i)claude.*haiku.
+        let mut request = AnthropicRequest {
+            model: "claude-haiku-4-5".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("plan a complex task".to_string()),
+            }],
+            max_tokens: 1024,
+            thinking: Some(ThinkingConfig {
+                r#type: "enabled".to_string(),
+                budget_tokens: Some(10_000),
+            }),
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            forward_headers: vec![],
+            token_count: None,
+        };
+
+        let decision = router.route(&mut request).unwrap();
+        // Fork behaviour (NOT upstream): Background wins over Think when the
+        // model name matches claude.*haiku. Upstream 9j would assert Think here.
+        assert_eq!(
+            decision.route_type,
+            RouteType::Background,
+            "fork routes claude-haiku + thinking to Background (diverges from upstream 9j Think)"
+        );
+        assert_eq!(decision.model_name, "background.model");
+    }
+
     #[test]
     fn test_websearch_tool_detection() {
         let config = create_test_config();

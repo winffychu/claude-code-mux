@@ -333,4 +333,77 @@ think 在第 6。
 - ✅ ② 修代码让 fallback 支持 `request.body.*` 通用（+ 单元测试）。
 - ✅ ④ 不删 `is_plan_mode`（保持 `[router].think` 向后兼容），文档推荐方向 A
   配方替代。
-- ❄️ ③ 不动 auto_map 顺序（保持默认行为，文档说明如何关）。
+
+---
+
+## 11. Fork vs 上游 route() 优先级链审计（2026-07-18）
+
+用户要求"结合上游源码分析我们是否破坏了 think"。对比 9j 原始仓 +
+`elidickinson` 中间 fork + 我们 fork 的 `route()` 优先级链：
+
+| priority | 上游 `9j/claude-code-mux` | `elidickinson` fork | 我们 fork (`winffychu`) |
+|:---:|---|---|---|
+| 0 | auto_map | auto_map | auto_map |
+| 1 | WebSearch | WebSearch | WebSearch |
+| 2 | **Subagent** | **Background** ←前移 | **Background** ←前移 |
+| 3 | **Think** | Subagent | Subagent |
+| 4 | **Background** | Prompt Rules (新) | Router Rules (新) |
+| 5 | Default | **Think** ←后挪 | Prompt Rules (新) |
+| 6 | | Default | **Think** ←再后挪 |
+| 7 | | | Long Context (新) |
+| 8 | | | Default |
+
+**溯源发现**：
+
+- **background 前置**（位 2，think 之前）是 `elidickinson` fork 引入的（注释
+  "checked early to save costs"），**不是我们 fork 引入的**。我们继承了它。
+- 我们 fork 在 `elidickinson` 的基础上**插入了 Router Rules (位 4) and
+  Long Context (位 7)**，把 think 从位 5 再推到位 6。
+
+### 11.1 真Functional regression（已真机复现）
+
+客户端发 `model=claude-haiku-4-5` + `thinking.type=enabled`：
+
+- **上游 9j**：`is_background_task("claude-haiku-4-5")` 在位 4 检查但**think
+  在位 3 已先命中** → 走 `think` model ✅
+- **我们 fork**：`is_background_task("claude-haiku-4-5")` 在位 2 匹配 `(?i)claude.*haiku`
+  就命中 → 走 `background` model，**think 永远不被检查** ❌
+
+真机实证（`cfg-remote-mirror3.toml` 真配置镜像 + 本地 debug binary）：
+发 payload `{"model":"claude-haiku-4-5","thinking":{"type":"enabled",...}}` 后
+`/api/logs` 路由结果是 `route_type=background` 而非 `think`。
+
+### 11.2 测试盲区根因
+
+`test_routing_priority`（L1137）声称 "Think wins" 但用的是
+`create_simple_request(...)`(model=`claude-opus-4`)，**不匹配** `(?i)claude.*haiku`
+正则 → background 不会命中 → think "赢"。这条测试**没有暴露** claude-haiku+think
+路径上的 regression。
+
+### 11.3 已做的回归守护（不修代码,只 pin 当前行为）
+
+新增 `test_think_vs_background_when_model_is_claude_haiku`（router/mod.rs
+L1151），用 `model="claude-haiku-4-5"` + `thinking.type=enabled`，**pin**
+当前 fork 的 `decision.route_type == Background` 行为。注释明确这是相对
+上游 9j 的偏离。任何未来重排（无论方向）都会被这条测试挡下要求更新。
+
+### 11.4 是否修回上游（需用户拍板）
+
+修回"think 早于 background"（即上游 9j 链）的代价：
+- 恢复 9j 顺序会让"只发 claude-haiku 模型名 + 无 thinking"的普通请求**先
+  通过 think 检查**（不命中）再到 background —— 功能上仍正确，但 think
+  检查无谓多做一次（一次 `Option::map` 很轻）。
+- 会偏离 `elidickinson` fork，日后从该 fork 同步改动可能冲突。
+- 与 remote 真实流量影响极小：远程客户端发 `glm-5`（非 claude-*），既不
+  命中 think 也不命中 background，此 regression 在 remote 当前不会触发。
+
+**倾向**：先保留当前行为（`elidickinson` 设计），只通过 §11.3 守护测试 pin
+住，留待 §11.4 由用户决定。是否进一步把 think 前移到 background 之前属于
+设计权衡，不在本轮范围。
+
+---
+
+## 12. ③ 决策记录
+
+- ❄️ ③ 不动 auto_map 顺序（维持默认 `^claude-`，文档说明如何
+  `auto_map_regex = "^$"` 关掉）。
