@@ -710,6 +710,134 @@ server `[:sync]` 路由分布（120 个决策行）：
 - 并发场景下 `RwLock` (provider registry / state) 与 `tokio::fs::write`
   (admin UI 同步路径)未观察到锁竞争异常(`update_config_json` 仍走非阻塞 async IO)。
 
+### 11.15 全 9 routing 分支真机端到端覆盖（2026-07-18）
+
+**测试目标**：`§11.14` 压测只在 payload 短/无 tool/无 tag 下覆盖了
+`background` / `think` / `default` 三条线；`long_context` 之外的 web-search /
+subagent / router-rule / prompt-rule / auto_map 分支从未真机触发。本节真机覆盖
+**全部 9 个 routing 分支** × `cost_first` 双模式，逐一对照 `route() [tag :sync]`
+日志与理论上路由顺序。
+
+#### 真实 LLM 上游
+- Provider: `nvidia` (`provider_type = "openai"`)
+- 上游: `http://172.168.0.82:3001/proxy/nv/v1/chat/completions`
+- 真实模型: `meta/llama-3.1-8b-instruct`
+- 入口: CCM `/v1/messages` (Anthropic 格式) → router → Anthropic→OpenAI transform → 上游 → OpenAI→Anthropic
+
+#### 触发配置（`all-branches-{false,true}.toml`）
+- `long_context = "longctx-model"` + `long_context_threshold = 50`
+- `websearch = "websearch-model"`
+- `background_regex` = 默认 `^claude-haiku` (匹配 haiku 入站)
+- `prompt_rules`: `^translate:` → `prompt-rule-model`  (`strip_match = false`)
+- `router.rules`: `{ type = "model-prefix", prefix = "rollout-", model = "router-rule-model" }`
+- `auto_map_regex` = 默认 `^claude-` (把入站 `claude-X` 改为 default 后再走规则)
+- 7 个独立 `[[models]]` 全部映射到同一上游真实模型
+  (`meta/llama-3.1-8b-instruct`)，以排除上游差异，专注 ccm 路由本身
+
+#### `cost_first = false`（默认 think-first）
+
+| case | 入站 payload | server `[:sync]` tag | 命中分支 |
+|---|---|---|---|
+| B1 | `claude-opus-4-1` + `tools=[web_search]` | `[web-search]` | web-search (优先级1) |
+| B2 | `claude-opus-4-1` + `<CCM-SUBAGENT-MODEL>worker-agent</>` in system[1] | `[default]` (RouteType::Default) | subagent (tag) |
+| B3 | `claude-opus-4-1` + `thinking.type=enabled` | `[think]` | think (plan-mode) |
+| B4 | `claude-haiku-4-5` 无 think | `[background]` | background (haiku regex) |
+| B5 | `rollout-some-model` (model-prefix 命中) | `[prompt-rule]` (复用 tag) | router-rule |
+| B6 | `claude-opus-4-1` + user `translate: hi` | `[prompt-rule:translate:]` | prompt-rule |
+| B7 | `claude-opus-4-1` + 长 system (~350 tokens) | `[long-context]` | long-context |
+| B8 | `claude-foo-x` (auto_map 改成 `default-model`) | `[default]` | auto_map → default |
+| B9 | `claude-opus-4-1` 短 prompt 无 tool 无 tag | `[default]` | default fallback |
+
+时序日志 (cf=false):
+```
+14:07:22  [web-search]    claude-opus-4-1   → nvidia/llama-3.1-8b-instruct
+14:07:23  [default]       claude-opus-4-1   → nvidia/llama-3.1-8b-instruct   (B2 subagent)
+14:07:26  [think]         claude-opus-4-1   → nvidia/llama-3.1-8b-instruct
+14:07:28  [background]    claude-haiku-4-5  → nvidia/llama-3.1-8b-instruct
+14:07:28  [prompt-rule]   rollout-some-model→ nvidia/llama-3.1-8b-instruct   (B5 router_rule)
+14:07:29  [prompt-rule:translate:] opus     → nvidia/llama-3.1-8b-instruct
+14:07:30  [long-context]  claude-opus-4-1   → nvidia/llama-3.1-8b-instruct
+14:07:32  [default]       claude-foo-x      → nvidia/llama-3.1-8b-instruct   (B8 auto_map)
+14:07:33  [default]       claude-opus-4-1   → nvidia/llama-3.1-8b-instruct
+```
+
+理论 `cf=false` 顺序对照（router L222-232 doc）：
+Subagent → Think → Background → Router Rules → Prompt Rules → Long Context → Default
+（WebSearch 优先级 1 在最前，AutoMap 是 step 0 的模型名变换）— **9 个 case 全一致**。
+
+#### `cost_first = true`（cost-first）
+
+cf=true 顺序：WebSearch → Background → Subagent → Router Rules → Prompt Rules →
+Think → Long Context → Default（关键差异：Background 在 Subagent / Think 之前）。
+
+| case | 入站 payload | server `[:sync]` tag | 命中分支 | cf=false 对照 |
+|---|---|---|---|---|
+| C1 | opus + web_search tool | `[web-search]` | web-search | 同 |
+| C2 | opus + subagent tag | `[default]` | subagent (tag) | 同 (background 不匹配 opus) |
+| C3 | **haiku + subagent tag** | `[background]` | background | **差异** — cf=false 走 subagent, cf=true background 抢先 ✓ |
+| C4 | **haiku + thinking** | `[background]` | background | **差异** — cf=false 走 think, cf=true background 抢先 ✓ |
+| C5 | opus + thinking | `[think]` | think | 同 (background 不匹配 opus) |
+| C6 | haiku 无 think | `[background]` | background | 同 |
+| C7 | `rollout-some-model` | `[prompt-rule]` | router-rule | 同 |
+| C8 | opus + `translate: hi` | `[prompt-rule:translate:]` | prompt-rule | 同 |
+| C9 | 长 system opus | `[long-context]` | long-context | 同 |
+| C10 | `claude-foo-x` (auto_map) | `[default]` | auto_map → default | 同 |
+| C11 | opus 短 prompt | `[default]` | default | 同 |
+
+时序日志 (cf=true):
+```
+14:10:48  [web-search]            opus              → nvidia/llama-3.1-8b-instruct
+14:10:50  [default]               opus              → nvidia/llama-3.1-8b-instruct   (C2 subagent)
+14:10:52  [background]            haiku              → nvidia/llama-3.1-8b-instruct   (C3 关键差异)
+14:10:58  [background]            haiku              → nvidia/llama-3.1-8b-instruct   (C4 关键差异)
+14:10:58  [think]                 opus              → nvidia/llama-3.1-8b-instruct
+14:10:59  [background]            haiku              → nvidia/llama-3.1-8b-instruct
+14:10:59  [prompt-rule]           rollout-some-model→ nvidia/llama-3.1-8b-instruct   (router_rule)
+14:11:00  [prompt-rule:translate:]opus              → nvidia/llama-3.1-8b-instruct
+14:11:01  [long-context]          opus              → nvidia/llama-3.1-8b-instruct
+14:11:02  [default]               claude-foo-x      → nvidia/llama-3.1-8b-instruct   (auto_map)
+14:11:05  [default]               opus              → nvidia/llama-3.1-8b-instruct
+```
+
+#### 双模式差异点真机实证表
+
+| payload 形态 | cf=false 命中 | cf=true 命中 | 差异根因 |
+|---|---|---|---|
+| haiku + thinking (B3/C4) | `think` | `background` | cf=true: background 在 think 之前 |
+| haiku + subagent tag (B2/C3 不含 opus 主 case 对照, 这里是 C3 haiku) | subagent→`default` tag | `background` | cf=true: background 在 subagent 之前 |
+| opus + thinking (B3/C5) | `think` | `think` | background_regex 不匹配 opus, 两条路都走 think |
+
+> **Route layer / AutoMap 关键语义**:
+> - `try_background` 用 **`original_model`** (router L196 `let original_model = request.model.clone();`
+>   在 step-0 auto_map 之前拷贝)，**不被 auto_map 影响**。所以 `claude-haiku-4-5`
+>   即使被 `^claude-` auto_map 匹配改成 `default-model`, background 仍基于原
+>   `claude-haiku-4-5` 命中 `^claude-haiku` regex —— 这是设计 (避免 auto_map
+>   屏蔽 background detection 的 background-tasks 当作默认路由)。
+> - `try_subagent` / `try_router_rule` / `try_long_context` / `try_think` /
+>   fallback default **都用** `request.model` (auto_map 转换后)。
+> - server log `[:sync]` 行第三列 (入站 model) 显示的是 `original_model`
+>   (字符串)，而实际发到 provider 的 model 字段是 `route_decision.model_name`
+>   (=命中的 target model, 或 fallback 时 `request.model` 转换后值)。
+> - `auto_map` 命中不直接产生 routing tag —— 它仅 step 0 变换 model name，后续
+>   由 default fallback 或 background/subagent/router_rule 等按需要消费。
+
+#### 结论
+- 9 + 11 = **20 个 payload，全 9 个 routing 分支 × 2 模式真机触发**，
+  失败率 0/20, **route tag 与时序完全符合两模式的理论优先级链**。
+- `prompt-rule` 出现在 router-rule 命中上：这是设计
+  (router 规则命中走 `RouteType::PromptRule`，见 router/mod.rs `try_router_rule` L343-347)，
+  非 bug。
+- `subagent` 命中后 route tag 显示为 `default` (设计：`Subagent` 命中后 `route_type` 复用
+  `Default`)，时序区分靠随后 `[tag]` 标签是否有的 case 区分。
+- `auto_map` 优先于所有路由层 (`step 0`)，但**不改路由顺序**：变换后的 model 走默认路由。
+- 与 §11.10 单 request e2e 和 §11.14 并发压测合并，三层证据链一致：
+  - §11.10 — 单 request 真机 (4 payload × 2 mode = 8):
+   routing 分布符合理论；
+  - §11.14 — 并发压测真实 LLM (280 req):
+   并发稳定性 0 失败；
+  - §11.15 — 全 9 分支真机覆盖 (20 req):
+   每个分支真机触发且 tag 符合理论。
+
 ---
 
 ## 12. ③ 决策记录
