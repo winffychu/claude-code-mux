@@ -209,69 +209,156 @@ impl Router {
             }
         }
 
-        // 2. Subagent Model (system prompt tag)
-        if let Some(model) = self.extract_subagent_model(request) {
-            debug!(
-                "🤖 Routing to subagent model (CCM-SUBAGENT-MODEL tag): {}",
-                model
-            );
-            return Ok(RouteDecision {
-                model_name: model,
-                route_type: RouteType::Default,
-                matched_prompt: None,
-            });
+        // 2..7: ordered routing layers. Two priority modes:
+        //
+        // Default (think-first, cost_first=false, matches upstream 9j):
+        //   Subagent → Think → Background → Router Rules → Prompt Rules → Long Context
+        //   user-explicit `thinking.type=enabled` wins over cost optimization
+        //   (a `claude-haiku` request with thinking routes to Think, not
+        //   hijacked by Background)
+        //
+        // Cost-first (cost_first=true, matches elidickinson `8c1b65a` design):
+        //   Background → Subagent → Router Rules → Prompt Rules → Think → Long Context
+        //   background detection hijacks thinking requests matching the
+        //   background_regex. Use when `claude-haiku-*` is intended as cheap
+        //   background tasks regardless of user thinking intent.
+        //
+        // See docs/think-routing.md §11 for full archaeology + rationale.
+        if self.config.router.cost_first {
+            // Cost-first ordering (elidickinson `8c1b65a` + our Router Rules
+            // placed at the same priority as its Prompt Rules).
+            if let Some(d) = self.try_background(&original_model) {
+                return Ok(d);
+            }
+            if let Some(d) = self.try_subagent(request) {
+                return Ok(d);
+            }
+            if let Some(d) = self.try_router_rule(request) {
+                return Ok(d);
+            }
+            if let Some(d) = self.try_prompt_rule(request) {
+                return Ok(d);
+            }
+            if let Some(d) = self.try_think(request) {
+                return Ok(d);
+            }
+            if let Some(d) = self.try_long_context(request) {
+                return Ok(d);
+            }
+        } else {
+            // Default think-first ordering (upstream 9j).
+            if let Some(d) = self.try_subagent(request) {
+                return Ok(d);
+            }
+            if let Some(d) = self.try_think(request) {
+                return Ok(d);
+            }
+            if let Some(d) = self.try_background(&original_model) {
+                return Ok(d);
+            }
+            if let Some(d) = self.try_router_rule(request) {
+                return Ok(d);
+            }
+            if let Some(d) = self.try_prompt_rule(request) {
+                return Ok(d);
+            }
+            if let Some(d) = self.try_long_context(request) {
+                return Ok(d);
+            }
         }
 
-        // 3. Think mode (Plan Mode / Reasoning)
-        // [B-experiment]: restored to upstream 9j order — Think checked BEFORE
-        // Background so that a client request like `claude-haiku-4-5` +
-        // `thinking.type=enabled` correctly routes to Think instead of being
-        // eaten by the background regex. See docs/think-routing.md §11.
+        // Fallback: Use the transformed model name (from auto-mapping) or original if no mapping
+        debug!("✅ Using model: {}", request.model);
+        Ok(RouteDecision {
+            model_name: request.model.clone(),
+            route_type: RouteType::Default,
+            matched_prompt: None,
+        })
+    }
+
+    /// Try subagent routing (CCM-SUBAGENT-MODEL tag in system prompt).
+    /// Returns the chosen model name with `RouteType::Default` if matched.
+    fn try_subagent(&self, request: &mut AnthropicRequest) -> Option<RouteDecision> {
+        match self.extract_subagent_model(request) {
+            Some(model) => {
+                debug!(
+                    "🤖 Routing to subagent model (CCM-SUBAGENT-MODEL tag): {}",
+                    model
+                );
+                Some(RouteDecision {
+                    model_name: model,
+                    route_type: RouteType::Default,
+                    matched_prompt: None,
+                })
+            }
+            None => None,
+        }
+    }
+
+    /// Try Think routing (`thinking.type=enabled` → think_model).
+    fn try_think(&self, request: &AnthropicRequest) -> Option<RouteDecision> {
         if let Some(ref think_model) = self.config.router.think {
             if self.is_plan_mode(request) {
                 debug!("🧠 Routing to think model (Plan Mode detected)");
-                return Ok(RouteDecision {
+                return Some(RouteDecision {
                     model_name: think_model.clone(),
                     route_type: RouteType::Think,
                     matched_prompt: None,
                 });
             }
         }
+        None
+    }
 
-        // 4. Background tasks (check against ORIGINAL model name, before auto-mapping)
+    /// Try Background routing (ORIGINAL model name matches background_regex).
+    /// `original_model` is the client-side model name captured before
+    /// auto-mapping — see `is_background_task` docs.
+    fn try_background(&self, original_model: &str) -> Option<RouteDecision> {
         if let Some(ref background_model) = self.config.router.background {
-            if self.is_background_task(&original_model) {
+            if self.is_background_task(original_model) {
                 debug!("🔄 Routing to background model");
-                return Ok(RouteDecision {
+                return Some(RouteDecision {
                     model_name: background_model.clone(),
                     route_type: RouteType::Background,
                     matched_prompt: None,
                 });
             }
         }
+        None
+    }
 
-        // 5. Router Rules (condition + model-prefix → rewrite)
-        // New: declarative rules with condition matching and request rewriting
-        if let Some(model) = self.match_router_rule(request) {
-            debug!("📋 Routing to model via router rule: {}", model);
-            return Ok(RouteDecision {
-                model_name: model,
-                route_type: RouteType::PromptRule,
-                matched_prompt: None,
-            });
+    /// Try Router Rules (declarative condition / model-prefix rules + rewrite).
+    fn try_router_rule(&self, request: &mut AnthropicRequest) -> Option<RouteDecision> {
+        match self.match_router_rule(request) {
+            Some(model) => {
+                debug!("📋 Routing to model via router rule: {}", model);
+                Some(RouteDecision {
+                    model_name: model,
+                    route_type: RouteType::PromptRule,
+                    matched_prompt: None,
+                })
+            }
+            None => None,
         }
+    }
 
-        // 6. Prompt Rules (pattern matching on user prompt)
-        if let Some((model, matched_text)) = self.match_prompt_rule(request) {
-            debug!("📝 Routing to model via prompt rule match: {}", model);
-            return Ok(RouteDecision {
-                model_name: model,
-                route_type: RouteType::PromptRule,
-                matched_prompt: Some(matched_text),
-            });
+    /// Try Prompt Rules (regex on turn-starting user message content).
+    fn try_prompt_rule(&self, request: &mut AnthropicRequest) -> Option<RouteDecision> {
+        match self.match_prompt_rule(request) {
+            Some((model, matched_text)) => {
+                debug!("📝 Routing to model via prompt rule match: {}", model);
+                Some(RouteDecision {
+                    model_name: model,
+                    route_type: RouteType::PromptRule,
+                    matched_prompt: Some(matched_text),
+                })
+            }
+            None => None,
         }
+    }
 
-        // 7. Long Context (token count exceeds threshold)
+    /// Try Long Context routing (token count ≥ threshold).
+    fn try_long_context(&self, request: &mut AnthropicRequest) -> Option<RouteDecision> {
         if let Some(ref long_context_model) = self.config.router.long_context {
             let threshold = self.config.router.long_context_threshold.unwrap_or(100_000);
             if request.token_count.is_none() {
@@ -283,22 +370,14 @@ impl Router {
                     "📏 Routing to long-context model ({} tokens >= {})",
                     token_count, threshold
                 );
-                return Ok(RouteDecision {
+                return Some(RouteDecision {
                     model_name: long_context_model.clone(),
                     route_type: RouteType::LongContext,
                     matched_prompt: None,
                 });
             }
         }
-
-        // 8. Default fallback
-        // Use the transformed model name (from auto-mapping) or original if no mapping
-        debug!("✅ Using model: {}", request.model);
-        Ok(RouteDecision {
-            model_name: request.model.clone(),
-            route_type: RouteType::Default,
-            matched_prompt: None,
-        })
+        None
     }
 
     /// Match router rules: iterate rules in order, return model if a rule matches.
@@ -998,6 +1077,7 @@ mod tests {
                 background_regex: None, // Use default claude-haiku pattern
                 prompt_rules: vec![],   // No prompt rules by default
                 rules: vec![],          // No router rules by default
+                cost_first: false,      // Default think-first (see docs/think-routing.md §11)
             },
             providers: vec![],
             models: vec![],
@@ -1201,6 +1281,130 @@ mod tests {
             "Think must win over Background when thinking.type=enabled (upstream 9j order restored)"
         );
         assert_eq!(decision.model_name, "think.model");
+    }
+
+    /// Guard: with `cost_first = true`, a `claude-haiku` + `thinking.type=enabled`
+    /// request is hijacked to Background (restoring elidickinson `8c1b65a`
+    /// cost-first design) instead of Think. This is the dual of
+    /// `test_think_vs_background_when_model_is_claude_haiku` and pins the
+    /// runtime-configurable cost-first escape hatch.
+    #[test]
+    fn test_cost_first_haiku_thinking_routes_to_background() {
+        let mut config = AppConfig {
+            server: ServerConfig::default(),
+            router: RouterConfig {
+                default: "default.model".to_string(),
+                background: Some("background.model".to_string()),
+                think: Some("think.model".to_string()),
+                websearch: None,
+                long_context: None,
+                long_context_threshold: Some(100_000),
+                auto_map_regex: None,
+                background_regex: None,
+                prompt_rules: vec![],
+                rules: vec![],
+                cost_first: true, // cost-first mode (elidickinson `8c1b65a`)
+            },
+            providers: vec![],
+            models: vec![],
+        };
+        config.router.cost_first = true;
+        let router = Router::new(config);
+
+        let mut request = AnthropicRequest {
+            model: "claude-haiku-4-5".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("plan a complex task".to_string()),
+            }],
+            max_tokens: 1024,
+            thinking: Some(ThinkingConfig {
+                r#type: "enabled".to_string(),
+                budget_tokens: Some(10_000),
+            }),
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            forward_headers: vec![],
+            token_count: None,
+        };
+
+        let decision = router.route(&mut request).unwrap();
+        assert_eq!(
+            decision.route_type,
+            RouteType::Background,
+            "cost_first=true must restore elidickinson cost-first: background hijacks haiku+thinking"
+        );
+        assert_eq!(decision.model_name, "background.model");
+    }
+
+    /// Guard: with `cost_first = true`, Prompt Rules still precede Think (same
+    /// priority slot elidickinson `c3a435c` reserved for "prompt rule before
+    /// think"). A thinking request that matches a prompt rule must route to
+    /// the rule target, not the think model — pinning that the cost-first mode
+    /// fully restores elidickinson's two design commits, not just background.
+    #[test]
+    fn test_cost_first_prompt_rule_beats_think_when_both_present() {
+        let config = AppConfig {
+            server: ServerConfig::default(),
+            router: RouterConfig {
+                default: "default.model".to_string(),
+                background: Some("background.model".to_string()),
+                think: Some("think.model".to_string()),
+                websearch: None,
+                long_context: None,
+                long_context_threshold: Some(100_000),
+                auto_map_regex: None,
+                background_regex: None,
+                prompt_rules: vec![crate::cli::PromptRule {
+                    pattern: "commit".to_string(),
+                    model: "prompt-rule-model".to_string(),
+                    strip_match: false,
+                }],
+                rules: vec![],
+                cost_first: true,
+            },
+            providers: vec![],
+            models: vec![],
+        };
+        let router = Router::new(config);
+
+        // opus avoids the background_regex so we isolate prompt-rule-vs-think.
+        let mut request = AnthropicRequest {
+            model: "claude-opus-4".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("commit these changes".to_string()),
+            }],
+            max_tokens: 1024,
+            thinking: Some(ThinkingConfig {
+                r#type: "enabled".to_string(),
+                budget_tokens: Some(10_000),
+            }),
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            forward_headers: vec![],
+            token_count: None,
+        };
+
+        let decision = router.route(&mut request).unwrap();
+        assert_eq!(
+            decision.route_type,
+            RouteType::PromptRule,
+            "cost_first=true restores elidickinson c3a435c: prompt rule beats think"
+        );
+        assert_eq!(decision.model_name, "prompt-rule-model");
     }
 
     /// B-experiment audit: after moving Think ahead of Background, verify the

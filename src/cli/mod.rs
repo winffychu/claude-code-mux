@@ -161,6 +161,22 @@ pub struct RouterConfig {
     /// Router rules: condition-based or model-prefix rules with rewrites
     #[serde(default)]
     pub rules: Vec<RouterRule>,
+    /// Cost-first routing priority (default: false = think-first).
+    ///
+    /// When `false` (default, matches upstream 9j semantic): user-explicit
+    /// `thinking.type=enabled` wins over background cost optimization. A
+    /// `claude-haiku` request with thinking enabled routes to `think` model
+    /// instead of being hijacked to `background` model.
+    ///
+    /// When `true` (matches elidickinson cost-first design per commit
+    /// `8c1b65a` "prioritize background routing"): background tasks hijack
+    /// thinking requests matching the background_regex. Useful when
+    /// `claude-haiku-*` is intended as cheap background tasks regardless of
+    /// user thinking intent.
+    ///
+    /// See docs/think-routing.md §11.
+    #[serde(default)]
+    pub cost_first: bool,
 }
 
 /// Prompt-based routing rule

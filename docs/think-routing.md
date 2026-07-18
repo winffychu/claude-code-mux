@@ -590,6 +590,57 @@ cost-first 与 user intent 冲突。
   Prompt Rules)" — **模仿 elidickinson Prompt Rules "优先 think" 哲学**
   把 Router Rules 放在 think 之前的位 4
 
+### 11.12 最终方案: `cost_first` 配置开关（用户拍板）
+
+用户设计意图: **"默认 think-first + 设置里可选 cost-first 开关"**。
+
+实现: `RouterConfig.cost_first: bool` (默认 `false` = think-first)。
+
+配置语法（toml）:
+```toml
+[router]
+default = "claude-haiku-4-5"
+background = "..."
+think = "..."
+# 默认不写 cost_first = false (think-first, 匹配 9j 上游)
+
+# 想恢复 elidickinson cost-first 行为:
+cost_first = true
+```
+
+两种模式下 route() 优先级链:
+
+| 模式 | 优先级链 |
+|---|---|
+| `cost_first=false` (默认, 9j think-first) | Auto-map → WebSearch → **Subagent → Think → Background → Router Rules → Prompt Rules → Long Context** → Default |
+| `cost_first=true` (elidickinson cost-first) | Auto-map → WebSearch → **Background → Subagent → Router Rules → Prompt Rules → Think → Long Context** → Default |
+
+架构实现: route() 提取 6 个 helper (`try_subagent`/`try_think`/`try_background`/
+`try_router_rule`/`try_prompt_rule`/`try_long_context`), 按 `cost_first` 选择
+顺序调度 — 无代码重复, 易审计, 易扩展。
+
+真机实证（基于真配置 mirror3 + 同一 payload `claude-haiku-4-5 + thinking.type=enabled`）:
+
+| 配置 | 实测路由日志 | route_type |
+|---|---|---|
+| `cost_first=false`（默认）| `🧠 Routing to think model (Plan Mode detected)` | think ✅ |
+| `cost_first=true` | `🔄 Routing to background model` → fallback chain (glm-5/glm-5.2/dsv4-pro/...) | background |
+
+守护测试:
+- `test_think_vs_background_when_model_is_claude_haiku` — pin think-first 默认
+- `test_cost_first_haiku_thinking_routes_to_background` — pin cost_first=true
+  恢复 background 抢占
+- `test_cost_first_prompt_rule_beats_think_when_both_present` — pin cost_first=true
+  也恢复 elidickinson `c3a435c` 的 prompt-rule > think 优先
+- 271 tests passed, 0 failed
+
+### 11.13 设计哲学归属与尊重
+
+B 实施本身就是设计观点改变, 但放弃对 elidickinson 设计的兜底 (强制 think-first)
+是不尊重 fork 作者选择 — `cost_first=true` 配置恢复原名 `elidickinson` 设计
+意图(`8c1b65a` cost-first + `c3a435c` prompt-rule-first), 保留向后兼容的逃生口
+, 同时以 think-first 为默认推荐。
+
 ---
 
 ## 12. ③ 决策记录

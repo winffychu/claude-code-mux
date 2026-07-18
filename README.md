@@ -450,7 +450,20 @@ Navigate to **Test** tab:
 
 ## Routing Logic
 
-**Flow**: Auto-map (transform) → WebSearch > Background > Subagent > Router Rules > Prompt Rules > Think > Long Context > Default
+The router supports two priority modes, switched via `cost_first` (default `false`):
+
+- **`cost_first = false` (default — think-first, matches upstream 9j)**:
+  `Auto-map → WebSearch > Subagent > Think > Background > Router Rules > Prompt Rules > Long Context > Default`
+  User-explicit `thinking.type=enabled` wins over background cost optimization — a
+  `claude-haiku` request with thinking correctly routes to Think instead of being
+  hijacked to Background.
+- **`cost_first = true` (cost-first, matches elidickinson fork design)**:
+  `Auto-map → WebSearch > Background > Subagent > Router Rules > Prompt Rules > Think > Long Context > Default`
+  Background detection hijacks thinking requests matching the background_regex.
+  Use when `claude-haiku-*` is intended as cheap background tasks regardless of
+  user thinking intent.
+
+See `docs/think-routing.md` §11 for full archaeology (9j → elidickinson → our fork).
 
 ### 0. Auto-mapping (Model Name Transformation)
 - **Trigger**: Model name matches `auto_map_regex` pattern
@@ -466,14 +479,14 @@ Navigate to **Test** tab:
 - **Example**: Claude Code using web search tool
 - **Routes to**: `websearch` model (e.g., GLM-4.6)
 
-### 2. Background Tasks (Cost Optimization)
-- **Trigger**: ORIGINAL model name matches `background_regex` pattern
+### 2. Background Tasks (Cost Optimization) — `cost_first=true` priority slot
+- **Trigger**: ORIGINAL model name matches `background_regex` pattern (checked BEFORE auto-mapping)
 - **Default Pattern**: `(?i)claude.*haiku` (case-insensitive)
-- **Example**: Request with `model="claude-4-5-haiku"` (checked BEFORE auto-mapping)
+- **Example**: Request with `model="claude-4-5-haiku"`
 - **Routes to**: `background` model (e.g., GLM-4.5-air)
 - **Configuration**: Set in Router or Settings tab
 
-> **Important**: Background detection uses the ORIGINAL model name, not the auto-mapped one. It's checked early (priority 2) to prevent expensive models from being used for background tasks spawned by prompt rules or other routing.
+> **Important**: Background detection uses the ORIGINAL model name, not the auto-mapped one. When `cost_first=true`, it's checked early (priority 2) to prevent expensive models from being used for background tasks spawned by prompt rules or other routing. When `cost_first=false` (default), Background is checked AFTER Think so user-explicit thinking wins.
 
 ### 3. Subagent Model
 - **Trigger**: System prompt contains `<CCM-SUBAGENT-MODEL>model-name</CCM-SUBAGENT-MODEL>` tag
