@@ -528,6 +528,68 @@ background 而不是 think"这个 trade-off 副作用 — 间接导致用户 per
 - 从 elidickinson "cost-first + 主动指令-first" 回退到 9j "think-first"
   (user 显式 thinking 优先一切)
 
+### 11.10 haiku vs opus 真机对照实证（用户要求验证）
+
+用户要求"用 haiku 和 opus 测试就知道了"。通过 git worktree 在 3 个独立
+编译环境跑 4 个 payload × 3 binary 实测:
+
+| 测试 | payload | **elidickinson** | **9j upstream** | **我们 B 后** |
+|---|---|---|---|---|
+| A | haiku + thinking | `🔄 background` ❌ | `🧠 think` ✅ | `🧠 think` ✅ |
+| B | haiku 无 thinking | `🔄 background` ✅ | `🔄 background` ✅ | `🔄 background` ✅ |
+| C | opus + thinking | `🧠 think` ✅ | `🧠 think` ✅ | `🧠 think` ✅ |
+| D | opus 无 thinking | `✅ default(claude-haiku-4-5)` | 同 | 同 |
+
+**核心差异暴露**:
+
+- **A (haiku + thinking)**: 3 环境行为差异显著
+  - elidickinson: background 命中（cost-first 副作用, 破坏 user 显式 thinking）
+  - 9j / B 后: think 命中（think-first, 尊重 user 显式 thinking）
+- **B (haiku 无 thinking)**: 3 环境一致走 background（无 thinking 优先级冲突）
+- **C (opus + thinking)**: 3 环境一致走 think（opus 不命中 `(?i)claude.*haiku`,
+  background 不触发）
+- **D (opus 无 thinking)**: 3 环境一致走 default fallback
+
+**haiku vs opus 差异本质**: `(?i)claude.*haiku` 默认背景正则**仅影响
+haiku-family client 名**。haiku 通常是 cost-sensitive 客户端发 model,
+elidickinson 作者意图"claude-haiku 通常用作 cheap background tasks 应走
+background 而非 think" — `cost optimization` 设计本意。
+
+但作者忽略:用户也可能用 claude-haiku 显式开 thinking 想 think — 这种场景
+cost-first 与 user intent 冲突。
+
+**当前真配置 (mirror3) 下影响分析**:
+
+- `default=background=think = "claude-haiku-4-5"` (同 model name)
+- A 测试无论走 background 还是 think, 最终都走 `claude-haiku-4-5` 这个 model
+  的同一 fallback chain → 真实上游相同 (glm-5 / dsv4-pro / agnes-2.0-flash)
+- **B 实施在当前配置下仅修正 `/api/logs` 的 route_type 标签语义, 无实际
+  model 转向差异**
+- 若配置改 `think="claude-opus-4-5"` 等**不同 model name**, A 测试走 think
+  时真实上游 = claude-opus, 走 background 时仍 = glm-5 — 此时才有真实
+  functional 差异
+
+### 11.11 用户提的"真实模型 vs 客户端名"澄清
+
+用户关心: "haiku-4-5 必定走 background 但真实模型是 dsv4flash, 那么这里
+和你说的 glm 模型导致不走 think 冲突"。
+
+源码审计确认:
+- `is_background_task(&original_model)` 检查的是 **client 原始 model 名**
+  (L189 保存, 在 auto_map L195 改 request.model 之前)
+- **不是** auto-mapped 后的 default model
+- **不是** `[[models]] name=...` fallback chain 选中的真实上游 actual_model
+- README 明确写: "Background detection checks the ORIGINAL model name
+  (before auto-mapping)"
+
+我们引入 Router Rules 的目的（commit `a5b66ad`, 作者 Hermes Agent）:
+- **声明式条件路由** (vs prompt regex 更结构化)
+- 设计意图: 按 `request.body.model` 等 request 字段做条件分流 + `rewrite`
+  改 model 字段
+- commit 明确: "step 4 in route() fallthrough (after Subagent, before
+  Prompt Rules)" — **模仿 elidickinson Prompt Rules "优先 think" 哲学**
+  把 Router Rules 放在 think 之前的位 4
+
 ---
 
 ## 12. ③ 决策记录
