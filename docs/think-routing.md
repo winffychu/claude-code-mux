@@ -923,7 +923,10 @@ server log（cf=true）：
 - **路由命中 + model 有 1:N provider mapping 但 primary 上游异常**：
   → 同 model 内 1:N retry 优先级，HTTP 200 + 上游映射第二次成功，**不退 default**。
 - **若所有 N 个 mapping 全失败**:
-  → HTTP 502 `All N provider mappings failed`, **不退 default**。（未真机复现，配置测试做不到 — 需所有上游全坏，留给单元测试 `test_all_mappings_failed` 覆盖）
+  → HTTP 502 `All N provider mappings failed`, **不退 default**。（**已真机复现**
+  — 见下方附加的 `cost_first = false/true` 各一组 `G1/G2` 测试。配置：把命中的
+  model 全部 mapping 指向 invalid-key 上游 provider，触发 1:N 遍历完都 401 →
+  `❌ All N mappings failed`。两模式行为一致。）
 - **cf=false 与 cf=true 在所有 4 种异常场景下行为一致** (路由前两层的 fail-fast
   与 1:N fallback 都与 `cost_first` 路由顺序无关，因为 fallback 机制发生在**路由决策之后**)。
 - **注意**：单 mapping model（如 `default-model` 本身配置只 1 个 nvidia provider）失败
@@ -933,6 +936,63 @@ server log（cf=true）：
 - 本节未覆盖的边缘：上游返回非 200 + 仍 parsed JSON 但内容异常（如部分截断
   /上游反 401 但附 HTML body）。ccm 对所有 transport-level 错都进 `trying next fallback`
   分支（见 L690-694），不依赖响应体内容语义。
+
+#### 补充：所有 N mapping 全失败 真机复现（cf=false/true 各一组）
+
+为补 §11.16 的"所有 N 全 fail → HTTP 502"事项的真机实证（之前文档写"留给单元测试
+`test_all_mappings_failed` 覆盖"，但该单元测试**实际不存在**——所以真机补上）。
+
+**配置**（`edge-all-fail.toml` / `edge-all-fail-true.toml`）:
+```toml
+[[providers]]
+name = "broken1"
+provider_type = "openai"
+api_key = "invalidkey1"   # invalid key → 401
+base_url = "${NVIDIA_BASE_URL}"
+models = []
+
+[[providers]]
+name = "broken2"
+provider_type = "openai"
+api_key = "invalidkey2"   # invalid key → 401
+base_url = "${NVIDIA_BASE_URL}"
+models = []
+
+[[models]]
+name = "default-model"
+mappings = [
+    { priority = 1, provider = "broken1", actual_model = "meta/llama-3.1-8b-instruct" },
+    { priority = 2, provider = "broken2", actual_model = "meta/llama-3.1-8b-instruct" }
+]
+```
+入站：`claude-opus-4-1` 短 prompt → 路由命中 default（`default-model`），1:N fallback
+遍历 broken1 → broken2，**全部 401 → HTTP 502 `All 2 provider mappings failed`**。
+
+**`cost_first = false` G1 server log** (port 18841):
+```
+14:52:34  [default]     claude-opus-4-1   → broken1/meta/llama-3.1-8b-instruct          # (1/2)
+14:52:34  ⚠️ Provider broken1 failed: 401 - UNAUTHORIZED, trying next fallback
+14:52:34  [default]     claude-opus-4-1   → broken2/meta/llama-3.1-8b-instruct  [2/2]   # (2/2)
+14:52:34  ⚠️ Provider broken2 failed: 401 - UNAUTHORIZED, trying next fallback
+14:52:34  ❌ All provider mappings failed for model: default-model
+→ HTTP 502: {"error":{"type":"error","message":"All 2 provider mappings failed for model: default-model"}}
+```
+
+**`cost_first = true` G2 server log** (port 18842, 复用同配置只改 `cost_first=true`):
+```
+14:54:21  [default]     claude-opus-4-1   → broken1/meta/llama-3.1-8b-instruct          # (1/2)
+14:54:21  ⚠️ Provider broken1 failed: 401, trying next fallback
+14:54:21  [default]     claude-opus-4-1   → broken2/meta/llama-3.1-8b-instruct  [2/2]   # (2/2)
+14:54:21  ⚠️ Provider broken2 failed: 401, trying next fallback
+14:54:21  ❌ All provider mappings failed for model: default-model
+→ HTTP 502: {"error":{"type":"error","message":"All 2 provider mappings failed for model: default-model"}}
+```
+
+**结论**：所有 N 个 mapping 全失败 → HTTP 502 + `❌ All N provider mappings failed`
+（与 server/mod.rs L702-707 完全一致），**不退 default**。cf=false 和 cf=true 行为
+一致（fail-fast 仍在同 model 内，与路由顺序无关）。完全闭环 —— §11.16 现在所有
+4 种异常场景全部真机复现 + log 在文档中可查。
+
 ---
 
 ## 12. ③ 决策记录
