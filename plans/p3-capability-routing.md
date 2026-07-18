@@ -1,6 +1,6 @@
 # P3: Provider Capability 路由 — 协议感知的模型/Fallback 自动重写
 
-> 来源：CCR `service.ts:1851-1928`（rewriteProviderHeader L1851, rewriteFallbackForProtocol L1887, rewriteBodyModelForProtocol L1897, rewriteModelSelectorForProtocol L1910）vs CCM `server/mod.rs:610-879`
+> 来源：CCR `service.ts:1851-1928`（rewriteProviderHeader L1851, rewriteFallbackForProtocol L1887, rewriteBodyModelForProtocol L1897, rewriteModelSelectorForProtocol L1910）vs CCM `server/mod.rs:610-879`（**注**：cost_first 测试加入后 server/mod.rs 已扩至 1234 行，`handle_messages` 现实际范围 `L795-1072`；本 plan 暂缓未实施，引用为历史审计快照）
 > 状态：暂缓（2026-07-10 风险审计：硬依赖 P2 FallbackConfig + handler 已固定 protocol + 实际价值低，风险 > 收益）
 > 审计修正：2026-07-03 — 补充 `rewriteBodyModelForProtocol()` 对齐（见底部修正日志）/ 2026-07-09 三轮修正（见底部修正日志 #7-#10）
 

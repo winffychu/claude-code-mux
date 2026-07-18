@@ -1,6 +1,6 @@
 # P2: 故障重试升级 — 指数退避 + Retry-After + 智能Fallback
 
-> 来源：CCR `service.ts:2041-2133`（fetchUpstreamWithFallback）+ `2507-2560`（shouldFallbackAfterStatus + parseRetryAfterHeaderMs + exponentialRetryBackoffMs）vs CCM `server/mod.rs:610-879`
+> 来源：CCR `service.ts:2041-2133`（fetchUpstreamWithFallback）+ `2507-2560`（shouldFallbackAfterStatus + parseRetryAfterHeaderMs + exponentialRetryBackoffMs）vs CCM `server/mod.rs:610-879`（**注**：cost_first 测试加入后 server/mod.rs 已扩至 1234 行，`handle_messages` 现实际范围 `L795-1072`；本 plan 暂缓未实施，引用为历史审计快照）
 > 状态：暂缓（2026-07-10 风险审计：3 处遍历点遗漏 + streaming 不可能 fallback + chain 映射不明确，风险 > 收益）
 > 审计修正：2026-07-03 初版（2 处修正 + 拆分为 P2a/P2b）/ 2026-07-04 二次修正（7 处文档错误修正，见底部修正日志 #4-#10）/ 2026-07-09 三轮修正（见底部修正日志 #11-#13）
 
@@ -124,7 +124,7 @@ fetchUpstreamWithFallback:
      - x-ccr-fallback-model
 ```
 
-### CCM 现状（`server/mod.rs:610-879`）
+### CCM 现状（`server/mod.rs:610-879`，**历史审计快照**；当前 `handle_messages` 实际 `L795-1072`）
 
 ```
 handle_messages:
