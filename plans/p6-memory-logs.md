@@ -180,8 +180,8 @@ let stream = async_stream::stream! { ... }  // 或 unfold
 下列两条在 P6 实施后的真机审计中发现，经确认为**设计权衡**而非缺陷：
 
 - **fallback 链每尝试一个 provider mapping 就记一条 `req` trace 条目**：
-  `trace_request` 在 `src/server/mod.rs` 的 fallback for 循环内调用（L647
-  OpenAI 端点、L923 Anthropic 端点），与 stdout `info!` 的 `[n/N]` 重试
+  `trace_request` 在 `src/server/mod.rs` 的 fallback for 循环内调用（L659
+  OpenAI 端点、L935 Anthropic 端点），与 stdout `info!` 的 `[n/N]` 重试
   标记同步——记录每次 fallback 尝试的 actual_model，便于排查"哪个上游
   被尝试、哪个成功/失败"。`/api/logs` 的 `total` 是**trace 条目数**
   而非请求数；前端按 `trace_id` 去重才是请求数。
@@ -200,7 +200,7 @@ let stream = async_stream::stream! { ... }  // 或 unfold
 
 ### 5.1 现状问题
 
-CCM `route()` 硬编码 8 层 fallthrough（mod.rs:180），其中 Think 层（mod.rs:579）单一触发条件：
+CCM `route()` 硬编码 8 层 fallthrough（mod.rs:194），其中 Think 层（`try_think` mod.rs:307 / `is_plan_mode` mod.rs:694）单一触发条件：
 
 ```rust
 fn is_plan_mode(&self, request: &AnthropicRequest) -> bool {
