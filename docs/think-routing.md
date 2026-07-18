@@ -485,6 +485,49 @@ C. **加 `request.thinking.type` 这种 condition 让用户用 Rule 显式判断
 倾向 A：当前 B 状态 + 守护测试已覆盖，文档 §11.6/§11.7 说清语义即可。
 若有使用 Router Rules 想"覆盖 thinking"的场景再考虑 B 方案。
 
+### 11.8 elidickinson 历史完整考古（commit 8c1b65a + c3a435c）
+
+用户要求"elidickinson 基础上先测试（在没有 Router Rules 干扰）确认是否
+正常"——通过 git worktree 在三个独立环境做纯净对照实测：
+
+- **9j 上游纯净** (`/tmp/9j-test`): D 测试 `claude-haiku+thinking` 实测
+  走 `🧠 Routing to think model (Plan Mode detected)` ✅ 与 README 一致
+  (9j 设计 think 在 background 之前)
+- **elidickinson 纯净** (`/tmp/eli-test`): D 测试实测走
+  `🔄 Routing to background model` ❌ **回归是 elidickinson 原生引入**,
+  与我们引入的 Router Rules/LongContext 完全无关
+- **我们 B 实施后** (`/opt/data/home/ccm` HEAD=`b6ae1a9`): D 测试走
+  think ✅ — B 修了 elidickinson 原生回归
+
+**elidickinson 历史考古**（commit message 原文）:
+
+| Commit | 时间 | 设计意图 |
+|---|---|---|
+| `c3a435c feat(router): add prompt-based routing rules` | 2025-12-01 | elidickinson 首次引入 Prompt Rules, commit msg 原文: "Check prompt rules after subagent model but before think mode" — 主动设计 prompt rules > think |
+| `8c1b65a fix: forward Anthropic rate limit headers and prioritize background routing` | 2025-12-20 | elidickinson 主动前移 background 到 priority 2, commit msg 原文: "2. Move background routing to 2nd priority (after websearch)" + "cost optimization" — 主动 cost-first 设计 |
+
+**elidickinson 完整设计哲学**（commit 考古确认）:
+- `c3a435c`: prompt rules 在 think 之前 — 主动指令 > 被动检测
+- `8c1b65a`: background 在 think 之前 — cost optimization > user 显式 think
+- 即: **background > prompt_rules > think** 是 elidickinson 主动设计
+
+Regression 不是无意 bug: elidickinson 作者明确选择了 **cost-first** 而非
+**think-first**。但作者没在 README 提示"claude-haiku + thinking 会走
+background 而不是 think"这个 trade-off 副作用 — 间接导致用户 perspective
+中的"functional regression"。
+
+### 11.9 B 实施对 elidickinson 两个 commit 的影响
+
+| elidickinson 主动设计 | elidickinson 原行为 | B 实施后 | 性质 |
+|---|---|---|---|
+| `8c1b65a` background cost-first (claude-haiku+thinking 走 background) | 走 background | **走 think** | **否定了 elidickinson cost-first 设计** (user perspective 修了 bug) |
+| `c3a435c` prompt rules 优先 think (thinking+匹配规则走 rule) | 走 prompt rule model | **走 think** | **否定了 elidickinson 主动指令优先设计** |
+
+所以 B 实施是**双向否定 elidickinson 两个主动设计 commit** — 不是简单
+修复 bug, 是改变设计哲学:
+- 从 elidickinson "cost-first + 主动指令-first" 回退到 9j "think-first"
+  (user 显式 thinking 优先一切)
+
 ---
 
 ## 12. ③ 决策记录
