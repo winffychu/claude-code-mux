@@ -176,11 +176,11 @@ impl Router {
     ///
     /// Priority order (highest to lowest):
     /// 1. WebSearch - tool-based detection (web_search tool present)
-    /// 2. Background - model name regex match (e.g., haiku) - checked early to save costs
-    /// 3. Subagent - CCM-SUBAGENT-MODEL tag in system prompt
-    /// 4. Router Rules - condition + model-prefix matching with rewrites
-    /// 5. Prompt Rules - regex pattern matching on user prompt (after background for cost savings)
-    /// 6. Think - Plan Mode / reasoning enabled
+    /// 2. Subagent - CCM-SUBAGENT-MODEL tag in system prompt
+    /// 3. Think - Plan Mode / reasoning enabled  [B-experiment: restored to upstream 9j order]
+    /// 4. Background - model name regex match (e.g., haiku) - checked AFTER Think (9j semantic)
+    /// 5. Router Rules - condition + model-prefix matching with rewrites
+    /// 6. Prompt Rules - regex pattern matching on user prompt
     /// 7. Long Context - token count exceeds threshold (long_context model)
     /// 8. Default - auto-mapped or original model name
     pub fn route(&self, request: &mut AnthropicRequest) -> Result<RouteDecision> {
@@ -209,20 +209,7 @@ impl Router {
             }
         }
 
-        // 2. Background tasks (check against ORIGINAL model name, before auto-mapping)
-        // Checked early to prevent expensive models being used for background tasks
-        if let Some(ref background_model) = self.config.router.background {
-            if self.is_background_task(&original_model) {
-                debug!("🔄 Routing to background model");
-                return Ok(RouteDecision {
-                    model_name: background_model.clone(),
-                    route_type: RouteType::Background,
-                    matched_prompt: None,
-                });
-            }
-        }
-
-        // 3. Subagent Model (system prompt tag)
+        // 2. Subagent Model (system prompt tag)
         if let Some(model) = self.extract_subagent_model(request) {
             debug!(
                 "🤖 Routing to subagent model (CCM-SUBAGENT-MODEL tag): {}",
@@ -235,7 +222,35 @@ impl Router {
             });
         }
 
-        // 4. Router Rules (condition + model-prefix → rewrite)
+        // 3. Think mode (Plan Mode / Reasoning)
+        // [B-experiment]: restored to upstream 9j order — Think checked BEFORE
+        // Background so that a client request like `claude-haiku-4-5` +
+        // `thinking.type=enabled` correctly routes to Think instead of being
+        // eaten by the background regex. See docs/think-routing.md §11.
+        if let Some(ref think_model) = self.config.router.think {
+            if self.is_plan_mode(request) {
+                debug!("🧠 Routing to think model (Plan Mode detected)");
+                return Ok(RouteDecision {
+                    model_name: think_model.clone(),
+                    route_type: RouteType::Think,
+                    matched_prompt: None,
+                });
+            }
+        }
+
+        // 4. Background tasks (check against ORIGINAL model name, before auto-mapping)
+        if let Some(ref background_model) = self.config.router.background {
+            if self.is_background_task(&original_model) {
+                debug!("🔄 Routing to background model");
+                return Ok(RouteDecision {
+                    model_name: background_model.clone(),
+                    route_type: RouteType::Background,
+                    matched_prompt: None,
+                });
+            }
+        }
+
+        // 5. Router Rules (condition + model-prefix → rewrite)
         // New: declarative rules with condition matching and request rewriting
         if let Some(model) = self.match_router_rule(request) {
             debug!("📋 Routing to model via router rule: {}", model);
@@ -246,8 +261,7 @@ impl Router {
             });
         }
 
-        // 5. Prompt Rules (pattern matching on user prompt)
-        // NOTE: Checked AFTER background to ensure background tasks use cheaper models
+        // 6. Prompt Rules (pattern matching on user prompt)
         if let Some((model, matched_text)) = self.match_prompt_rule(request) {
             debug!("📝 Routing to model via prompt rule match: {}", model);
             return Ok(RouteDecision {
@@ -255,18 +269,6 @@ impl Router {
                 route_type: RouteType::PromptRule,
                 matched_prompt: Some(matched_text),
             });
-        }
-
-        // 6. Think mode (Plan Mode / Reasoning)
-        if let Some(ref think_model) = self.config.router.think {
-            if self.is_plan_mode(request) {
-                debug!("🧠 Routing to think model (Plan Mode detected)");
-                return Ok(RouteDecision {
-                    model_name: think_model.clone(),
-                    route_type: RouteType::Think,
-                    matched_prompt: None,
-                });
-            }
         }
 
         // 7. Long Context (token count exceeds threshold)
@@ -1151,16 +1153,16 @@ mod tests {
 
     /// Fork regression guard (vs upstream 9j): when the client sends a
     /// `claude-haiku-*` model name together with `thinking.type == "enabled"`,
-    /// upstream `9j/claude-code-mux` routes to **Think** (think@3, background@4),
-    /// but this fork routes to **Background** — the `elidickinson` fork moved
-    /// Background ahead of Think (checked early "to save costs"), and this
-    /// fork inherited that ordering (see docs/think-routing.md §11).
+    /// upstream `9j/claude-code-mux` routes to **Think** (think@3, background@4).
+    /// The `elidickinson` fork had previously moved Background ahead of Think,
+    /// which this fork inherited; experiment "B" (see docs/think-routing.md §11)
+    /// restores the upstream 9j order so Think is checked BEFORE Background.
     ///
     /// `create_simple_request` uses `claude-opus-4`, which does NOT match the
     /// default `(?i)claude.*haiku` regex, so `test_routing_priority` above
-    /// passes *without* exercising the haiku path. This guard pins the actual
-    /// fork behaviour so the divergence from upstream is explicit and
-    /// detectable, and so any future reorder is forced to update this test.
+    /// passes *without* exercising the haiku path. This guard pins the
+    /// corrected behaviour so the divergence from upstream stays fixed and
+    /// any future reorder is forced to update this test.
     #[test]
     fn test_think_vs_background_when_model_is_claude_haiku() {
         let config = create_test_config();
@@ -1191,14 +1193,14 @@ mod tests {
         };
 
         let decision = router.route(&mut request).unwrap();
-        // Fork behaviour (NOT upstream): Background wins over Think when the
-        // model name matches claude.*haiku. Upstream 9j would assert Think here.
+        // B-experiment: Think wins over Background even when the model name
+        // matches claude.*haiku — matches upstream 9j semantic.
         assert_eq!(
             decision.route_type,
-            RouteType::Background,
-            "fork routes claude-haiku + thinking to Background (diverges from upstream 9j Think)"
+            RouteType::Think,
+            "Think must win over Background when thinking.type=enabled (upstream 9j order restored)"
         );
-        assert_eq!(decision.model_name, "background.model");
+        assert_eq!(decision.model_name, "think.model");
     }
 
     #[test]

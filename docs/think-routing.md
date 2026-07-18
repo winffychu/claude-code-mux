@@ -387,19 +387,45 @@ L1151），用 `model="claude-haiku-4-5"` + `thinking.type=enabled`，**pin**
 当前 fork 的 `decision.route_type == Background` 行为。注释明确这是相对
 上游 9j 的偏离。任何未来重排（无论方向）都会被这条测试挡下要求更新。
 
-### 11.4 是否修回上游（需用户拍板）
+### 11.4 决策与实施（B 思路：修回上游 9j 顺序）
 
-修回"think 早于 background"（即上游 9j 链）的代价：
-- 恢复 9j 顺序会让"只发 claude-haiku 模型名 + 无 thinking"的普通请求**先
-  通过 think 检查**（不命中）再到 background —— 功能上仍正确，但 think
-  检查无谓多做一次（一次 `Option::map` 很轻）。
-- 会偏离 `elidickinson` fork，日后从该 fork 同步改动可能冲突。
-- 与 remote 真实流量影响极小：远程客户端发 `glm-5`（非 claude-*），既不
-  命中 think 也不命中 background，此 regression 在 remote 当前不会触发。
+用户指示"先按 B 思路测试看看，若有改善则正式实施提交"。实施 B：
+将 `route()` 里 Think 块从位 6 **前移到 Background 之前**（位 3），完整链
+恢复到与上游 9j 一致：
 
-**倾向**：先保留当前行为（`elidickinson` 设计），只通过 §11.3 守护测试 pin
-住，留待 §11.4 由用户决定。是否进一步把 think 前移到 background 之前属于
-设计权衡，不在本轮范围。
+| 位 | B 实施后(已提交) |
+|:--:|---|
+| 1 | WebSearch |
+| 2 | Subagent |
+| 3 | **Think** ← 从位 6 前移 |
+| 4 | Background |
+| 5 | Router Rules |
+| 6 | Prompt Rules |
+| 7 | Long Context |
+| 8 | Default |
+
+- 单元测试：258 passed 0 failed，无回归（既有测试用 `claude-opus-4` 等非
+  haiku 模型不受重排影响）。
+- 守护测试 `test_think_vs_background_when_model_is_claude_haiku` 的断言
+  从 `RouteType::Background` 改为 `RouteType::Think`，pin 修正后的行为。
+- **真机复现改善**：用 `cfg-remote-mirror3.toml` + 新 debug binary 发
+  `{"model":"claude-haiku-4-5","thinking":{"type":"enabled"}}`，原 fork
+  返回 `route_type=background`，**B 实施后返回 `route_type=think`** ✅。
+  fallback chain 仍走 think model 的 provider chain（agnes-ai / sub2api-cc
+  fallback 与真配置 think = claude-haiku-4-5 的 mappings 一致）。
+
+实施提交：见 git log "B-experiment: restore think before background (upstream 9j order)"。
+
+### 11.5 设计权衡备注
+
+- B 实施后，"claude-haiku 无 thinking 普通请求"会**多走一次 think 检查**
+  （一次 `Option::map` 开销可忽略），再走 background 命中。成本差异微乎其微。
+- 偏离 `elidickinson` fork 的"background 前移省成本"设计，但本 fork 本来
+  就已与 elidickinson 分家（加了 Router Rules + Long Context）。从该 fork
+  同步改动时需手动跳过这条 reorder。
+- 远程真配置当前 `default=background=think=claude-haiku-4-5` 同 model，
+  即便路由分支不同 fallback chain 仍相同——B 实施在远程**无破坏性影响**，
+  仅修正 `/api/logs` 的 route_type 标签语义。
 
 ---
 
