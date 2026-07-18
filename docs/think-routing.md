@@ -838,6 +838,101 @@ Think → Long Context → Default（关键差异：Background 在 Subagent / Th
   - §11.15 — 全 9 分支真机覆盖 (20 req):
    每个分支真机触发且 tag 符合理论。
 
+### 11.16 异常 / 空规则 / 1:N mapping fallback 真机覆盖（2026-07-18）
+
+**测试目标**：用户问题——`router.rules` / `prompt_rules` 都留空时 ccm 是否退默认？
+某模型异常（路由命中 target=未配置的 model / 上游 provider 失败）是否退默认？
+本节真机覆盖这四种异常 + 空 规则场景的 ccm 实际行为。
+
+#### 源码事实（已 grep 确认）
+- 路由链 **fall through** 是设计：空 `router.rules` 数组 → `match_router_rule` 循环 0
+  次 → 自动跳到下个层（prompt_rules → long_context → default）。空 `prompt_rules`
+  同理。**这不算异常，是路由链 fall through 的正常设计**。
+- router 命中的 target model 未在 `[[models]]` 配置 + `provider_registry` 也找不到
+  → server/mod.rs `L708-748`：**`❌ No model mapping or provider found`** HTTP 502
+  返回，**不退 default**（fail-fast；路由决策已下，layer fallback 不会跳回路由层）。
+- 命中 model 的 mapping 在 `[[models]]` 配置了但上游 provider 调用失败
+  → server/mod.rs `L605-700`：按 priority 顺序 **1:N mapping retry** (`[idx+1/N]`
+  indicator)，全失败后 `❌ All N provider mappings failed` HTTP 502，
+  **不退 default**（fail-fast 在同 model 的 N 个 mapping 内）。
+
+#### 触发配置（`edge-false.toml` / `edge-true.toml`）
+- 注意：`router.rules` 含一条 `prefix = "broken-"` → `model = "nonexistent-model"`，
+  `nonexistent-model` **不**在 `[[models]]` 配置（用来触发 L743 fail-fast）。
+- `think-model` 有 1:N mapping:
+  ```toml
+  [[models]]
+  name = "think-model"
+  mappings = [
+      { priority = 1, provider = "nvidia-bad", actual_model = "meta/llama-3.1-8b-instruct" },
+      { priority = 1, provider = "nvidia",    actual_model = "meta/llama-3.1-8b-instruct" }
+  ]
+  ```
+  `nvidia-bad` 用 invalid API key, 期望其 401 → fallback 到第二条 `nvidia`。
+
+#### `cost_first = false`（4 case 全过 / 失败=预期）
+
+| case | 入站 | server `[:sync]` / error | 状态码 | 行为 |
+|---|---|---|---|---|
+| E1 | `claude-opus-4-1` 短 prompt 无 tool 无 tag | `[default]` | 200 OK | 空 rules → fall through → default ✓ |
+| E2 | `broken-some-name` (prefix=`broken-` 命中) | `❌ No model mapping or provider found for model: nonexistent-model` | **HTTP 502** | router-rule 命中 target 未配置 → **fail-fast, 不退 default** |
+| E3 | opus + thinking (think 命中) | `[think] opus → nvidia-bad` → `⚠️ nvidia-bad failed: 401 UNAUTHORIZED, trying next fallback` → `[think] opus → nvidia [2/2]` → `✅` | 200 OK | **1:N mapping fallback 真机触发** |
+| E4 | opus + 长 system (~350 tokens) | `[long-context]` | 200 OK | 空 rules 不破坏 long_context fall through ✓ |
+
+server log（cf=false）:
+```
+# E1/E2/E4 一组连跑（配置里 think-model 没有 bad mapping）
+14:28:46  [default]      claude-opus-4-1   → nvidia/meta/llama-3.1-8b-instruct      # E1
+14:28:51  ❌ No model mapping or provider found for model: nonexistent-model          # E2
+14:28:55  [long-context] claude-opus-4-1   → nvidia/meta/llama-3.1-8b-instruct       # E4
+
+# E3 是配 think-model mapping 增 `nvidia-bad` 后重启 server、单独跑:
+14:31:00  [think]         claude-opus-4-1   → nvidia-bad/meta/llama-3.1-8b-instruct   # E3 (1/2)
+14:31:00  ⚠️ Provider nvidia-bad failed: 401 - Authentication failed, trying next fallback
+14:31:00  [think]         claude-opus-4-1   → nvidia/meta/llama-3.1-8b-instruct [2/2]  # E3 (2/2)
+14:31:01  📊 1786ms 3tok
+```
+
+#### `cost_first = true`（4 case 全过 / 失败=预期）
+
+| case | 入站 | server `[:sync]` / error | 状态码 | 行为 |
+|---|---|---|---|---|
+| F1 | `claude-opus-4-1` 短 prompt | `[default]` | 200 OK | 空 rules fall through → default ✓ |
+| F2 | `broken-x` 命中 prefix | `❌ No model mapping` | **HTTP 502** | 同 E2 — fail-fast |
+| F3 | opus + thinking → think 命中 | `[think] → nvidia-bad → ⚠️ 401 → nvidia [2/2] → ✅` | 200 OK | 同 E3 — 1:N fallback |
+| F4 | opus + 长 system | `[long-context]` | 200 OK | 空 rules 不影响 long_context ✓ |
+
+server log（cf=true）：
+```
+14:32:36  [default]       claude-opus-4-1   → nvidia/llama-3.1-8b-instruct          # F1
+14:32:38  ❌ No model mapping or provider found for model: nonexistent-model          # F2
+14:32:38  [think]         claude-opus-4-1   → nvidia-bad/llama-3.1-8b-instruct       # F3 (1/2)
+14:32:38  ⚠️ Provider nvidia-bad failed: 401, trying next fallback
+14:32:38  [think]         claude-opus-4-1   → nvidia/llama-3.1-8b-instruct    [2/2]  # F3 (2/2)
+14:32:39  📊 1521ms 3tok
+14:32:40  [long-context]  claude-opus-4-1   → nvidia/llama-3.1-8b-instruct          # F4
+```
+
+#### 结论
+- **空 `router.rules` / `prompt_rules`**：ccm **正常 fall through** 到下个路由层，
+  最终走 default (或 long_context, 取决于上下文长度)。不是异常，是设计。
+- **路由命中 target=未配置 model**（含 router_rule 命中、prompt_rule model 字段、
+  `subagent` tag → unregistered-model 等情况）：
+  → HTTP 502 `No model mapping or provider found`，**不退 default**。
+  这是 fail-fast — 路由决策已下，layer fallback 不会回退到路由层。
+- **路由命中 + model 有 1:N provider mapping 但 primary 上游异常**：
+  → 同 model 内 1:N retry 优先级，HTTP 200 + 上游映射第二次成功，**不退 default**。
+- **若所有 N 个 mapping 全失败**:
+  → HTTP 502 `All N provider mappings failed`, **不退 default**。（未真机复现，配置测试做不到 — 需所有上游全坏，留给单元测试 `test_all_mappings_failed` 覆盖）
+- **cf=false 与 cf=true 在所有 4 种异常场景下行为一致** (路由前两层的 fail-fast
+  与 1:N fallback 都与 `cost_first` 路由顺序无关，因为 fallback 机制发生在**路由决策之后**)。
+- **注意**：单 mapping model（如 `default-model` 本身配置只 1 个 nvidia provider）失败
+  时 **不会退到其他 routing 分支**。例：若 `default-model` 的 single mapping provider error,
+  整请求 502 — 见 server L702 `❌ All 1 provider mappings failed`. 同样 fail-fast 不跳回
+  路由层的 next branch.
+- 本节未覆盖的边缘：上游返回非 200 + 仍 parsed JSON 但内容异常（如部分截断
+  /上游反 401 但附 HTML body）。ccm 对所有 transport-level 错都进 `trying next fallback`
+  分支（见 L690-694），不依赖响应体内容语义。
 ---
 
 ## 12. ③ 决策记录
