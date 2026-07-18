@@ -500,12 +500,12 @@ impl Router {
         // model-prefix examples that all use the `request.body.*` convention.
         let body = serde_json::to_value(request).ok()?;
         // Drop a leading "body" segment so `body.thinking.type` ≡ `thinking.type`.
-        // (The serialized AnthropicRequest has no `body` wrapper.) We treat a
-        // bare `body` as `request.body` — i.e. the whole request — which is
-        // almost certainly a misconfiguration, but returning the whole request
-        // JSON would let `contains-deep`/`contains` match *anything* and cause
-        // surprising false positives. So a lone "body" yields None (no value),
-        // matching the prior behaviour where `body` was not a real key.
+        // The serialized AnthropicRequest has no `body` wrapper, so a path that
+        // is *just* `body` (or `request.body`) resolves to nothing rather than
+        // to the whole request JSON — returning the latter would let
+        // `contains`/`contains-deep` match *anything* and trigger surprising
+        // false positives (e.g. `left="body" contains "a"` would always hit).
+        // This preserves the pre-§6 behaviour where `body` was not a real key.
         let is_bare_body = parts.len() == 1 && parts[0] == "body";
         let nav_parts: Vec<&str> = if is_bare_body {
             // Nothing to navigate to — signal "not found".
