@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `docs/think-routing.md §11.14` concurrent stress test against real LLM (NVIDIA/Llama-3.1-8B): 280 req / 0 failures, 38.5 req/s peak, route distribution matches both modes' theory precisely
 - New `docs/think-routing.md §11.15` full 9 routing-branch e2e coverage (web-search/subagent/think/background/router-rule/prompt-rule/long-context/auto_map/default) × `cost_first` dual mode = 20 req / 0 failures, `[:sync]` tags match theory per branch
 - New `docs/think-routing.md §11.16` edge / fallback real-LLM coverage (empty rules pass-through to default, route-target=unknown-model → HTTP 502 fail-fast, 1:N mapping retry with bad primary → successful fallback, all-N-mappings-failed → HTTP 502 fail-fast) × `cost_first` dual mode = 10 req (4 base + 4 base + 2 all-fail), all behaviors verified by server-log traces including `[2/2]` retry indicator and `❌ All 2 provider mappings failed`
+- Docs split: §11.10 / §11.11 / §11.14-11.16 真机实证内容 (408 行) 拆出到独立 `docs/routing-e2e-evidence.md` (422 行)，`think-routing.md` 保留设计主干 + anchor 引用，总长度 1009→613 行（↓ 39%），原 §11.X 编号保留以提高双文档互引稳定性
 - `update_config_json`: `tokio::fs::write` (async, non-blocking) instead of `std::fs::write`
 - RwLock poison recovery: `unwrap_or_else(|e| e.into_inner())` on all lock sites
 - `openai.rs:769`: `.expect()` → `match` returning error response (no panic on empty choices)
