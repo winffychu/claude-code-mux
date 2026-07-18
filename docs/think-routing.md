@@ -427,6 +427,64 @@ L1151），用 `model="claude-haiku-4-5"` + `thinking.type=enabled`，**pin**
   即便路由分支不同 fallback chain 仍相同——B 实施在远程**无破坏性影响**，
   仅修正 `/api/logs` 的 route_type 标签语义。
 
+### 11.6 B 实施引入的回归面审计（Router Rules / Prompt Rules）
+
+用户要求"审计是否 think 上位代替 background 造成错误感觉，必须测试"。
+完整测试 + 真机实证后确认：B 实施把 Think 从位 6 前移到 Background 前的
+位 3，但也让 Think 抢占了**原本在 Think 之前的 Router Rules / Prompt Rules**
+（原 fork 顺序 Rules@4 < Think@6；B 实施后 Think@3 < Rules@5）。
+
+**真实回归面**（已有单元 + 真机实证）：
+
+| 场景 | 原 fork | B 实施后 |
+|---|---|---|
+| `claude-* + thinking=enabled` + 配有匹配 `claude` prefix 的 Router Rule | Router Rule 命中（Rules@4 先于 Think@6）→ 走 rule-target-model | **Think 命中**（Think@3 先于 Rules@5）→ 走 think model |
+| `claude-* + thinking=None` + 同 Router Rule | Router Rule 命中 | Router Rule 仍命中（无 thinking 时 Think 不触发） |
+
+单元测试验证（258→267 passed）：
+- `test_think_now_beats_router_rule_when_both_match` — pin B 下 think 抢占
+  Router Rule 的新行为（断言 Think, 注释明确"old fork behaviour would have
+  returned PromptRule + rule-target.model"）。
+- `test_router_rule_still_fires_without_thinking` — pin 无 thinking 时
+  Router Rule 仍正常（无回归误伤）。
+- `test_background_still_wins_when_claude_haiku_without_thinking` — pin
+  claude-haiku 无 thinking 仍走 Background（对称面无破）。
+- `test_subagent_wins_over_think_when_both_present` — pin subagent 在 think
+  前（9j 顺序对的）。
+
+真机实证（`/tmp/cfg-rule-test.toml` RouterRule ModelPrefix=claude →
+rule-target-model, 启 `[server.tracing]`）：
+
+| req | payload | route_type | model |
+|---|---|---|---|
+| [0] | claude-opus-4 无 thinking | prompt-rule ✅ | rule-glm (rule-target) |
+| [1] | claude-opus-4 + thinking.type=enabled | **think** | glm-5 (think model = claude-haiku-4-5) |
+
+**所以 B 实施准确无疑地改变了"thinking + Router Rule 重叠"场景的路由结果**：
+原 fork 走 Router Rule 的 model，B 后走 think model。这不是 bug——是 B 修复
+background-vs-think 顺带引入的取舍面，与 9j 原始设计语义一致（9j 无 Router
+Rules 所以 9j 没这个问题；B 让 think 在 Rules 之前正好与 9j think@3 在
+background@4 之前的语义保持一致）。
+
+### 11.7 取舍决策（是否进一步让 Router Rules 覆盖 Think）
+
+若希望用户**显式声明的 Router Rules 优先于 think 自动检测**（即 thinking+
+Rule 重叠时走 Rule 而非 think），可选：
+
+A. **保持 B 现状**（推荐）：语义清晰——内置检测（WebSearch/Subagent/Think/
+  Background/LongContext）按固定优先级，用户 Rules 在其后是"无 thinking
+  时的附加拦截"。文档需说明此语义。
+B. **把 Router Rules 再前移到 Think 之前**（保留 think vs background 顺
+  序但让 Rules 抢先 think）：完整链变 WebSearch(1) → Subagent(2) → Router
+  Rules(3) → Think(4) → Background(5) → Prompt Rules(6) → Long Context(7)
+  → Default(8)。这样 Rules 永远优先于 think，但与上游 9j 顺序不完全一致
+  （9j 没 Rules，本就是扩展）。
+C. **加 `request.thinking.type` 这种 condition 让用户用 Rule 显式判断
+  thinking**，不依赖自动 think 检测。
+
+倾向 A：当前 B 状态 + 守护测试已覆盖，文档 §11.6/§11.7 说清语义即可。
+若有使用 Router Rules 想"覆盖 thinking"的场景再考虑 B 方案。
+
 ---
 
 ## 12. ③ 决策记录

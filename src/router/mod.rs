@@ -1203,6 +1203,194 @@ mod tests {
         assert_eq!(decision.model_name, "think.model");
     }
 
+    /// B-experiment audit: after moving Think ahead of Background, verify the
+    /// symmetric case is NOT broken — a claude-haiku request WITHOUT thinking
+    /// must still route to Background (Think check is skipped because
+    /// thinking is None / not enabled).
+    #[test]
+    fn test_background_still_wins_when_claude_haiku_without_thinking() {
+        let config = create_test_config();
+        let router = Router::new(config);
+
+        let mut request = AnthropicRequest {
+            model: "claude-haiku-4-5".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("classify this".to_string()),
+            }],
+            max_tokens: 1024,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            forward_headers: vec![],
+            token_count: None,
+        };
+
+        let decision = router.route(&mut request).unwrap();
+        assert_eq!(
+            decision.route_type,
+            RouteType::Background,
+            "claude-haiku WITHOUT thinking must still route to Background (B-experiment guard)"
+        );
+        assert_eq!(decision.model_name, "background.model");
+    }
+
+    /// B-experiment audit: Subagent is checked BEFORE Think (matches upstream
+    /// 9j order), so a request with both a CCM-SUBAGENT-MODEL tag AND
+    /// thinking.type=enabled must route to Subagent (Default route_type), not
+    /// Think. This guards against B-experiment accidentally reordering
+    /// Subagent/Think.
+    #[test]
+    fn test_subagent_wins_over_think_when_both_present() {
+        use crate::models::{SystemBlock, SystemPrompt};
+
+        let config = create_test_config();
+        let router = Router::new(config);
+
+        let mut request = AnthropicRequest {
+            model: "claude-opus-4".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("delegate this".to_string()),
+            }],
+            max_tokens: 1024,
+            thinking: Some(ThinkingConfig {
+                r#type: "enabled".to_string(),
+                budget_tokens: Some(10_000),
+            }),
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: Some(SystemPrompt::Blocks(vec![
+                SystemBlock {
+                    r#type: "text".to_string(),
+                    text: "Base system".to_string(),
+                    cache_control: None,
+                },
+                SystemBlock {
+                    r#type: "text".to_string(),
+                    text: "<CCM-SUBAGENT-MODEL>worker-agent</CCM-SUBAGENT-MODEL>".to_string(),
+                    cache_control: None,
+                },
+            ])),
+            tools: None,
+            forward_headers: vec![],
+            token_count: None,
+        };
+
+        let decision = router.route(&mut request).unwrap();
+        // Subagent (priority 2) wins over Think (priority 3) — even if thinking is enabled.
+        assert_eq!(
+            decision.route_type,
+            RouteType::Default,
+            "Subagent must win over Think when both are present (9j order)"
+        );
+        assert_eq!(decision.model_name, "worker-agent");
+    }
+
+    /// B-experiment audit (REAL regression risk!): a Router Rule that matches
+    /// a thinking request used to fire BEFORE Think (old fork order: Rules@4,
+    /// Think@6). Under B-experiment, Think@3 now runs BEFORE Router Rules@5,
+    /// so a thinking request that also matches a Router Rule will now route to
+    /// Think instead of the Router Rule's model. This pins the new behaviour
+    /// so the regression-from-the-rule-author's-perspective is explicit.
+    ///
+    /// If you WANT Router Rules to override Think (i.e. user-declared rules
+    /// take precedence over built-in thinking detection), you must either
+    /// reorder or add a conditional guard — see docs/think-routing.md §12.
+    #[test]
+    fn test_think_now_beats_router_rule_when_both_match() {
+        use crate::cli::{RouterRule, RouterRuleType};
+
+        let config = create_test_config();
+        let rule = RouterRule {
+            id: Some("thinking-rule".to_string()),
+            name: Some("match thinking requests".to_string()),
+            rule_type: RouterRuleType::ModelPrefix {
+                prefix: "claude".to_string(),
+            },
+            enabled: true,
+            rewrite: vec![],
+            model: Some("rule-target.model".to_string()),
+            threshold: None,
+        };
+        let router = Router::new(AppConfig {
+            router: crate::cli::RouterConfig {
+                rules: vec![rule],
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+
+        let mut request = create_simple_request("plan with thinking");
+        request.thinking = Some(ThinkingConfig {
+            r#type: "enabled".to_string(),
+            budget_tokens: Some(10_000),
+        });
+
+        let decision = router.route(&mut request).unwrap();
+        // B-experiment: Think@3 fires before Router Rules@5 — even though the
+        // rule's ModelPrefix "claude" would match the (un-auto-mapped) model.
+        // Old fork behaviour would have returned RouteType::PromptRule +
+        // "rule-target.model".
+        assert_eq!(
+            decision.route_type,
+            RouteType::Think,
+            "B-experiment: Think now beats Router Rule (reverse of old fork behaviour)"
+        );
+        assert_eq!(decision.model_name, "think.model");
+    }
+
+    /// B-experiment audit: WITHOUT thinking, a matching Router Rule must still
+    /// fire (Think is skipped because thinking is None). Guards that B's
+    /// reorder didn't accidentally disable Router Rules entirely.
+    #[test]
+    fn test_router_rule_still_fires_without_thinking() {
+        use crate::cli::{RouterRule, RouterRuleType};
+
+        let config = create_test_config();
+        let rule = RouterRule {
+            id: Some("prefix-rule".to_string()),
+            name: Some("route claude prefix".to_string()),
+            rule_type: RouterRuleType::ModelPrefix {
+                prefix: "claude".to_string(),
+            },
+            enabled: true,
+            rewrite: vec![],
+            model: Some("rule-target.model".to_string()),
+            threshold: None,
+        };
+        let router = Router::new(AppConfig {
+            router: crate::cli::RouterConfig {
+                rules: vec![rule],
+                auto_map_regex: Some("^$".to_string()),
+                ..config.router
+            },
+            ..config
+        });
+
+        let mut request = create_simple_request("no thinking here");
+        // no thinking field set
+
+        let decision = router.route(&mut request).unwrap();
+        assert_eq!(
+            decision.route_type,
+            RouteType::PromptRule,
+            "Router Rule still fires when thinking is None (B-experiment sanity)"
+        );
+        assert_eq!(decision.model_name, "rule-target.model");
+    }
+
     #[test]
     fn test_websearch_tool_detection() {
         let config = create_test_config();
