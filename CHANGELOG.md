@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Routing order now switchable via `cost_first` (default `false`):
   - `cost_first = false` (default — think-first, matches upstream 9j): auto-map → websearch → subagent → think → background → router.rules → prompt_rules → long_context → default
   - `cost_first = true` (cost-first, matches elidickinson fork): auto-map → websearch → background → subagent → router.rules → prompt_rules → think → long_context → default
+- Admin UI: new "Cost-First Routing" toggle in Settings tab exposing `cost_first` (sync + reload on save); zh-CN + en i18n
+- New `docs/think-routing.md §11.14` concurrent stress test against real LLM (NVIDIA/Llama-3.1-8B): 280 req / 0 failures, 38.5 req/s peak, route distribution matches both modes' theory precisely
 - `update_config_json`: `tokio::fs::write` (async, non-blocking) instead of `std::fs::write`
 - RwLock poison recovery: `unwrap_or_else(|e| e.into_inner())` on all lock sites
 - `openai.rs:769`: `.expect()` → `match` returning error response (no panic on empty choices)
