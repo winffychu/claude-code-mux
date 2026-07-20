@@ -274,10 +274,10 @@ name = "anthropic"
 # (these still work but you should migrate to "openai" + base_url).
 provider_type = "anthropic"
 
-# Authentication type: "api_key" or "oauth".
-auth_type = "api_key"
+# Authentication type: "apikey" or "oauth".
+auth_type = "apikey"
 
-# API key (required when auth_type = "api_key").
+# API key (required when auth_type = "apikey").
 # Can reference an env var with $VAR_NAME syntax.
 api_key = "<your-anthropic-api-key>"
 
@@ -297,7 +297,7 @@ enabled = true
 [[providers]]
 name = "openai"
 provider_type = "openai"
-auth_type = "api_key"
+auth_type = "apikey"
 api_key = "<your-openai-api-key>"
 # base_url = "https://api.openai.com/v1"
 models = ["gpt-4o", "gpt-4o-mini"]
@@ -307,7 +307,7 @@ enabled = true
 [[providers]]
 name = "zai"
 provider_type = "openai"
-auth_type = "api_key"
+auth_type = "apikey"
 api_key = "<your-zai-api-key>"
 base_url = "https://open.bigmodel.cn/api/paas/v4"
 models = ["glm-4.6", "glm-4.5-air"]
@@ -317,7 +317,7 @@ enabled = true
 [[providers]]
 name = "openrouter"
 provider_type = "openrouter"
-auth_type = "api_key"
+auth_type = "apikey"
 api_key = "<your-openrouter-api-key>"
 # base_url defaults to https://openrouter.ai/api/v1
 models = ["anthropic/claude-sonnet-4-5", "openai/gpt-4o"]
@@ -335,7 +335,7 @@ enabled = true
 # [[providers]]
 # name = "vertex-ai"
 # provider_type = "vertex"
-# auth_type = "api_key"   # uses ADC under the hood
+# auth_type = "apikey"   # uses ADC under the hood
 # project_id = "<your-gcp-project-id>"
 # location = "us-central1"
 

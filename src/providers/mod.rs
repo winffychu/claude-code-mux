@@ -90,7 +90,7 @@ pub struct ProviderConfig {
     pub name: String,
     pub provider_type: String,
 
-    /// Authentication type (default: api_key)
+    /// Authentication type (default: apikey — `AuthType::ApiKey`)
     #[serde(default)]
     pub auth_type: AuthType,
 
