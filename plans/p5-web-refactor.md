@@ -1,6 +1,6 @@
 # P5: Web 前端重构 + 长上下文路由 + 日志查看 + i18n
 
-> 状态：全部已实施 ✅。P5.1 长上下文路由 ✅，P5.2 SSE 日志流 ✅，P5.3 i18n（173 keys × 2 语言）✅，P5.4 日志查看器 ✅。性能/稳定性审计+修复 ✅（BufWriter, poison recovery, spawn_blocking, cached regex, autoSave 回退）。Docker 镜像 GHA 自动构建 ✅。
+> 状态：全部已实施 ✅。P5.1 长上下文路由 ✅，P5.2 SSE 日志流 ✅，P5.3 i18n（177 keys × 2 语言，P5 后续 cost_first / P6 相关 commits 加了 4 keys）✅，P5.4 日志查看器 ✅。性能/稳定性审计+修复 ✅（BufWriter, poison recovery, spawn_blocking, cached regex, autoSave 回退）。Docker 镜像 GHA 自动构建 ✅。
 > 来源：用户增加 P1 级别需求（4 项）
 > 创建：2026-07-10
 > 最终更新：2026-07-14

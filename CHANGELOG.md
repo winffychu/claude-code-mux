@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OpenAI-compatible `/v1/models` endpoint (aggregates provider models, BTreeSet dedup)
 - Message tracing with BufWriter (buffered I/O, lazy flush on /api/logs)
 - Live logs viewer: `/api/logs` (paginated) and `/api/logs/stream` (real-time SSE)
-- Admin UI i18n (zh-CN + en, 173 keys each)
+- Admin UI i18n (zh-CN + en, 173 keys each; P5 后续 cost_first / P6 commit 又加 4 keys → 现 177 keys each)
 - Admin UI dark theme (system prefers-color-scheme + manual toggle)
 - Admin UI URL-based tab navigation (`?tab=router`, `?tab=logs`, etc.)
 - Router rules: `[[router.rules]]` with model-prefix and condition type, request rewrites
