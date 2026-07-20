@@ -42,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `response_builder.body()`: `.unwrap()` → `match` with error fallback
 
 ### Fixed
+- `update_config_json`: `router.rules` / `router.prompt_rules` Vec arrays now persisted on PATCH (previously silent no-op — `update_field` helper only handled scalar string fields, so a JSON POST with rules/prompt_rules returned 200 success but wrote nothing to disk). Same replace-or-preserve semantics as `providers`/`models` sections: array present replaces the on-disk Vec, array absent preserves the existing Vec (so toggling `cost_first` etc. cannot wipe rules), empty array `[]` clears them. **Type-checked via strong `Vec<RouterRule>` / `Vec<PromptRule>` deserialise first** — malformed payloads (non-array string, partial rule missing required `prefix`) return HTTP 500 ParseError before touching disk, preventing legal-but-broken TOML from crashing the next `ccm start`. 7 `#[tokio::test]` guards added (`src/server/mod.rs::config_json_tests`) covering persist / replace / preserve / clear / non-array-reject / partial-rule-reject / **condition-variant round-trip** (both `RouterRuleType` variants — `model-prefix` and `condition` — exercised). The `serde_json::to_string` step uses `map_err` instead of `unwrap` so a serialise failure surfaces as a 500, not a panic.
+- `config.example.toml`: `auth_type = "api_key"` → `"apikey"` to match `ProviderAuthType::ApiKey` serde tag (mismatch caused fail-fast on `ccm start` with the example config)
 - Performance: tracing sync I/O + std::Mutex on every request → BufWriter + lazy flush
 - Stability: RwLock unwrap → poison propagation → server permanent crash on single panic
 - Stability: `.expect()` on empty OpenAI choices → panic → connection abort

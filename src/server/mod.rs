@@ -3,7 +3,7 @@ mod oauth_handlers;
 mod logs;
 mod i18n;
 
-use crate::cli::AppConfig;
+use crate::cli::{AppConfig, PromptRule, RouterRule};
 use crate::models::{AnthropicRequest, RouteType};
 use crate::router::Router;
 use crate::providers::ProviderRegistry;
@@ -399,6 +399,44 @@ async fn update_config_json(
                 if let Some(b) = val.as_bool() {
                     router_table.insert("cost_first".to_string(), toml::Value::Boolean(b));
                 }
+            }
+
+            // rules / prompt_rules are Vec<RouterRule> / Vec<PromptRule>.
+            // Replace the whole array when present in the incoming config
+            // (same pattern as `providers`/`models` above). Absent key
+            // preserves the existing on-disk Vec so a partial PATCH (e.g.
+            // toggling `cost_first`) cannot wipe rules/prompt_rules by
+            // accident. Sending an empty array `[]` clears them — intended
+            // "delete all" semantics.
+            //
+            // Type-check the JSON Vec by deserialising into the strong
+            // `RouterRule` / `PromptRule` struct first — prevents malformed
+            // payloads (e.g. scalar where array expected) from being written
+            // to disk as legal-but-broken TOML, which would fail-fast on the
+            // next `ccm start`.
+            if let Some(arr_val) = router.get("rules") {
+                let vec: Vec<RouterRule> = serde_json::from_value(arr_val.clone())
+                    .map_err(|e| AppError::ParseError(format!(
+                        "Failed to convert router.rules: {}", e)))?;
+                let json_str = serde_json::to_string(&vec)
+                    .map_err(|e| AppError::ParseError(format!(
+                        "Failed to serialise router.rules: {}", e)))?;
+                let arr_toml: toml::Value = serde_json::from_str(&json_str)
+                    .map_err(|e| AppError::ParseError(format!(
+                        "Failed to convert router.rules: {}", e)))?;
+                router_table.insert("rules".to_string(), arr_toml);
+            }
+            if let Some(arr_val) = router.get("prompt_rules") {
+                let vec: Vec<PromptRule> = serde_json::from_value(arr_val.clone())
+                    .map_err(|e| AppError::ParseError(format!(
+                        "Failed to convert router.prompt_rules: {}", e)))?;
+                let json_str = serde_json::to_string(&vec)
+                    .map_err(|e| AppError::ParseError(format!(
+                        "Failed to serialise router.prompt_rules: {}", e)))?;
+                let arr_toml: toml::Value = serde_json::from_str(&json_str)
+                    .map_err(|e| AppError::ParseError(format!(
+                        "Failed to convert router.prompt_rules: {}", e)))?;
+                router_table.insert("prompt_rules".to_string(), arr_toml);
             }
         }
     }
@@ -1244,3 +1282,272 @@ impl std::fmt::Display for AppError {
 }
 
 impl std::error::Error for AppError {}
+
+#[cfg(test)]
+mod config_json_tests {
+    use super::*;
+    use crate::cli::AppConfig;
+    use tempfile::NamedTempFile;
+
+    /// Build a minimal `AppState` pointing at an on-disk TOML seed.
+    ///
+    /// The handler only touches `state.config_path` and never reads
+    /// `state.snapshot()`, so a fully initialised `ReloadableState` is not
+    /// needed; an empty placeholder is enough.
+    fn state_with_seed(seed: &str) -> (NamedTempFile, Arc<AppState>) {
+        let mut f = NamedTempFile::new().expect("tempfile");
+        std::io::Write::write_all(&mut f, seed.as_bytes()).expect("write seed");
+
+        let repo_path = f.path().to_path_buf();
+
+        let token_store = TokenStore::new(std::env::temp_dir().join(format!(
+            "config_json_test_{}.json",
+            std::process::id()
+        )))
+        .expect("token store");
+
+        // All test seeds are complete TOMLs (server.port=0 + router.default
+        // etc.), so parsing always succeeds. The handler never calls
+        // snapshot(), so the in-memory AppConfig only needs to compile.
+        let app_cfg: AppConfig = toml::from_str(seed).expect("seed parses as AppConfig");
+
+        let reloadable = Arc::new(ReloadableState {
+            config: app_cfg.clone(),
+            router: Router::new(app_cfg),
+            provider_registry: Arc::new(ProviderRegistry::new()),
+            message_tracer: Arc::new(MessageTracer::new(
+                crate::cli::TracingConfig::default(),
+            )),
+        });
+
+        let state = Arc::new(AppState {
+            inner: std::sync::RwLock::new(reloadable),
+            token_store,
+            config_path: repo_path,
+        });
+
+        (f, state)
+    }
+
+    /// Dispatch the handler directly (no axum Router/ServiceExt needed).
+    async fn dispatch(state: Arc<AppState>, body: serde_json::Value) {
+        let _ = update_config_json(State(state), Json(body))
+            .await
+            .expect("handler returned error");
+    }
+
+    /// Dispatch expecting a handler error (used by fail-fast regression guards).
+    async fn dispatch_expect_err(state: Arc<AppState>, body: serde_json::Value) {
+        let res = update_config_json(State(state), Json(body)).await;
+        assert!(res.is_err(), "expected handler error, got {:?}", res);
+    }
+
+    fn disk(path: &std::path::Path) -> String {
+        std::fs::read_to_string(path).expect("read disk")
+    }
+
+    // ---- Vec persistence (the R9.5 bug + fix) -----------------------------
+
+    #[tokio::test]
+    async fn patch_prompt_rules_vec_replaces_and_persists() {
+        let seed = r#"
+[server]
+port = 0
+[router]
+default = "m"
+[[router.prompt_rules]]
+pattern = "old"
+model = "m"
+strip_match = false
+"#;
+        let (f, state) = state_with_seed(seed);
+        let body = serde_json::json!({
+            "router": {
+                "prompt_rules": [{"pattern": "new-pattern", "model": "n", "strip_match": true}]
+            }
+        });
+        dispatch(state, body).await;
+        let after = disk(f.path());
+        assert!(after.contains("new-pattern"), "new prompt_rule not persisted");
+        assert!(!after.contains("old"), "old prompt_rule still present");
+    }
+
+    #[tokio::test]
+    async fn patch_rules_vec_replaces_and_persists() {
+        let seed = r#"
+[server]
+port = 0
+[router]
+default = "m"
+[[router.rules]]
+id = "old-rule"
+name = "old"
+type = "model-prefix"
+prefix = "old-"
+enabled = true
+model = "m"
+"#;
+        let (f, state) = state_with_seed(seed);
+        let body = serde_json::json!({
+            "router": {
+                "rules": [{
+                    "id": "new-rule", "name": "new", "type": "model-prefix",
+                    "prefix": "new-", "enabled": true, "model": "n"
+                }]
+            }
+        });
+        dispatch(state, body).await;
+        let after = disk(f.path());
+        assert!(after.contains("new-rule"), "new router rule not persisted");
+        assert!(!after.contains("old-rule"), "old router rule still present");
+    }
+
+    // ---- regression guard: a PATCH without the Vec preserves existing ----
+
+    #[tokio::test]
+    async fn patch_without_vec_preserves_existing_rules_and_prompt_rules() {
+        let seed = r#"
+[server]
+port = 0
+[router]
+default = "m"
+cost_first = false
+[[router.rules]]
+id = "r1"
+name = "keep"
+type = "model-prefix"
+prefix = "keep-"
+enabled = true
+model = "m"
+[[router.prompt_rules]]
+pattern = "keep-pattern"
+model = "m"
+strip_match = false
+"#;
+        let (f, state) = state_with_seed(seed);
+        // Toggle cost_first only — no rules/prompt_rules keys in body.
+        let body = serde_json::json!({
+            "router": { "cost_first": true }
+        });
+        dispatch(state, body).await;
+        let after = disk(f.path());
+        assert_eq!(after.matches("[[router.rules]]").count(), 1, "router.rules wiped");
+        assert_eq!(
+            after.matches("[[router.prompt_rules]]").count(),
+            1,
+            "prompt_rules wiped"
+        );
+        assert!(after.contains("keep-"), "rule content wiped");
+        assert!(after.contains("keep-pattern"), "prompt_rule content wiped");
+        assert!(after.contains("cost_first = true"), "cost_first not updated");
+    }
+
+    // ---- empty array => clears (intended "delete all" semantics) ----------
+
+    #[tokio::test]
+    async fn patch_empty_vec_clears_existing() {
+        let seed = r#"
+[server]
+port = 0
+[router]
+default = "m"
+[[router.prompt_rules]]
+pattern = "x"
+model = "m"
+strip_match = false
+[[router.rules]]
+id = "r"
+name = "n"
+type = "model-prefix"
+prefix = "p-"
+enabled = true
+model = "m"
+"#;
+        let (f, state) = state_with_seed(seed);
+        let body = serde_json::json!({
+            "router": { "rules": [], "prompt_rules": [] }
+        });
+        dispatch(state, body).await;
+        let after = disk(f.path());
+        assert!(!after.contains("[[router.rules]]"), "router.rules not cleared");
+        assert!(!after.contains("[[router.prompt_rules]]"), "prompt_rules not cleared");
+    }
+
+    // ---- condition variant: RouterRuleType::Condition deserialise + persist -
+    // model-prefix is exercised above; this covers the 2nd variant of the
+    // `#[serde(tag = "type")]` enum — left/operator/right RuleCondition fields
+    // must round-trip through JSON → strong-type → TOML.
+    #[tokio::test]
+    async fn patch_condition_variant_router_rule_persists() {
+        let seed = r#"
+[server]
+port = 0
+[router]
+default = "m"
+"#;
+        let (f, state) = state_with_seed(seed);
+        let body = serde_json::json!({
+            "router": {
+                "rules": [{
+                    "id": "cond-1", "name": "c", "type": "condition",
+                    "left": "request.body.model", "operator": "==", "right": "cond-model",
+                    "enabled": true, "model": "m"
+                }]
+            }
+        });
+        dispatch(state, body).await;
+        let after = disk(f.path());
+        assert!(after.contains("type = \"condition\""), "condition tag not persisted");
+        assert!(after.contains("operator = \"==\""), "operator not persisted");
+        assert!(after.contains("cond-model"), "condition right value not persisted");
+        assert!(after.contains("request.body.model"), "condition left not persisted");
+    }
+
+    // ---- regression guard: non-array / partial Vec fails fast (no disk poison)
+    // Sending `rules: "invalid_literal"` would previously be converted to a
+    // legal-but-broken TOML string and written to disk, fail-fast crashing the
+    // next `ccm start`. The strong-type deserialise now rejects it with 500
+    // and disk stays unchanged.
+
+    #[tokio::test]
+    async fn patch_non_array_vec_rejected_without_disk_poison() {
+        let seed = r#"
+[server]
+port = 0
+[router]
+default = "m"
+[[router.rules]]
+id = "keep-rule"
+name = "k"
+type = "model-prefix"
+prefix = "k-"
+enabled = true
+model = "m"
+"#;
+        let (f, state) = state_with_seed(seed);
+        let body = serde_json::json!({ "router": { "rules": "invalid_literal" } });
+        dispatch_expect_err(state, body).await;
+        // disk must still contain the original valid rule, not the poison string
+        let after = disk(f.path());
+        assert!(after.contains("keep-rule"), "valid existing rule wiped on bad payload");
+        assert!(!after.contains("invalid_literal"), "poison string written to disk");
+    }
+
+    #[tokio::test]
+    async fn patch_partial_router_rule_rejected() {
+        let seed = r#"
+[server]
+port = 0
+[router]
+default = "m"
+"#;
+        let (f, state) = state_with_seed(seed);
+        // missing required `prefix` for model-prefix variant
+        let body = serde_json::json!({
+            "router": { "rules": [{"id":"x","name":"y","type":"model-prefix","enabled":true}] }
+        });
+        dispatch_expect_err(state, body).await;
+        let after = disk(f.path());
+        assert!(!after.contains("\"x\""), "partial rule written to disk");
+    }
+}

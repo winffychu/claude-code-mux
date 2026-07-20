@@ -271,16 +271,16 @@ Think → Long Context → Default（关键差异：Background 在 Subagent / Th
   次 → 自动跳到下个层（prompt_rules → long_context → default）。空 `prompt_rules`
   同理。**这不算异常，是路由链 fall through 的正常设计**。
 - router 命中的 target model 未在 `[[models]]` 配置 + `provider_registry` 也找不到
-  → server/mod.rs `L714-755`：**`❌ No model mapping or provider found`** HTTP 502
+  → server/mod.rs `L746-787`：**`❌ No model mapping or provider found`** HTTP 502
   返回，**不退 default**（fail-fast；路由决策已下，layer fallback 不会跳回路由层）。
 - 命中 model 的 mapping 在 `[[models]]` 配置了但上游 provider 调用失败
-  → server/mod.rs `L610-709`：按 priority 顺序 **1:N mapping retry** (`[idx+1/N]`
+  → server/mod.rs `L651-751`：按 priority 顺序 **1:N mapping retry** (`[idx+1/N]`
   indicator)，全失败后 `❌ All N provider mappings failed` HTTP 502，
   **不退 default**（fail-fast 在同 model 的 N 个 mapping 内）。
 
 #### 触发配置（`edge-false.toml` / `edge-true.toml`）
 - 注意：`router.rules` 含一条 `prefix = "broken-"` → `model = "nonexistent-model"`，
-  `nonexistent-model` **不**在 `[[models]]` 配置（用来触发 L755 fail-fast）。
+  `nonexistent-model` **不**在 `[[models]]` 配置（用来触发 L787 fail-fast）。
 - `think-model` 有 1:N mapping:
   ```toml
   [[models]]
@@ -353,11 +353,11 @@ server log（cf=true）：
   与 1:N fallback 都与 `cost_first` 路由顺序无关，因为 fallback 机制发生在**路由决策之后**)。
 - **注意**：单 mapping model（如 `default-model` 本身配置只 1 个 nvidia provider）失败
   时 **不会退到其他 routing 分支**。例：若 `default-model` 的 single mapping provider error,
-  整请求 502 — 见 server L714 `❌ All 1 provider mappings failed`. 同样 fail-fast 不跳回
+  整请求 502 — 见 server L746 `❌ All 1 provider mappings failed`. 同样 fail-fast 不跳回
   路由层的 next branch.
 - 本节未覆盖的边缘：上游返回非 200 + 仍 parsed JSON 但内容异常（如部分截断
   /上游反 401 但附 HTML body）。ccm 对所有 transport-level 错都进 `trying next fallback`
-  分支（见 L704-709），不依赖响应体内容语义。
+  分支（见 L736-741），不依赖响应体内容语义。
 
 #### 补充：所有 N mapping 全失败 真机复现（cf=false/true 各一组）
 
@@ -411,7 +411,7 @@ mappings = [
 ```
 
 **结论**：所有 N 个 mapping 全失败 → HTTP 502 + `❌ All N provider mappings failed`
-（与 server/mod.rs L714-719 完全一致），**不退 default**。cf=false 和 cf=true 行为
+（与 server/mod.rs L746-751 完全一致），**不退 default**。cf=false 和 cf=true 行为
 一致（fail-fast 仍在同 model 内，与路由顺序无关）。完全闭环 —— §11.16 现在所有
 4 种异常场景全部真机复现 + log 在文档中可查。
 
