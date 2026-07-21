@@ -19,6 +19,12 @@ const BLOCK_LIST: &[&str] = &[
     "x-real-ip",           // P2 预留：保护真实 IP
     "via",                 // 代理泄露
     "forwarded",           // 代理泄露
+    // Auth headers consumed by CCM gateways — never forward to upstreams.
+    // Prevents client CCM-auth credentials from leaking to / conflicting with
+    // provider credentials (provider sets its own auth in anthropic_compatible).
+    "x-api-key",       // LLM client auth (Anthropic convention)
+    "authorization",   // LLM client auth (OpenAI Bearer convention)
+    "x-ccm-admin-key", // admin UI/API auth (CCM-specific)
 ];
 
 /// 从入站 HeaderMap 提取可透传的 headers
@@ -128,6 +134,9 @@ mod tests {
             "x-real-ip",
             "via",
             "forwarded",
+            "x-api-key",
+            "authorization",
+            "x-ccm-admin-key",
         ];
         for key in &blocked {
             headers.insert(

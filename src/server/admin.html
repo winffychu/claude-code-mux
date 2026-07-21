@@ -1370,6 +1370,44 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                     </p>
 
                     <form id="settings-form" class="space-y-6">
+                        <!-- Admin API key (browser-side; stored in localStorage) -->
+                        <div class="card">
+                            <h2 class="text-xl font-bold mb-4">
+                                Admin Access Key
+                            </h2>
+                            <p class="text-gray-600 text-sm mb-4">
+                When the server has <code>admin_key</code> configured, set the
+                same value here. It is stored in your browser only and sent as
+                the <code>x-ccm-admin-key</code> header on every admin request.
+                Leave empty if the server has no admin key (open mode).
+                            </p>
+                            <div class="flex gap-3">
+                                <input
+                                    type="password"
+                                    id="admin-key-input"
+                                    class="flex-1 px-4 py-2 border rounded-lg
+                                    border-gray-300 dark:border-gray-700
+                                    dark:bg-gray-800 dark:text-gray-200"
+                                    placeholder="admin key (stored in browser)"
+                                />
+                                <button type="button"
+                                    id="save-admin-key-btn"
+                                    class="px-4 py-2 bg-blue-600 text-white
+                                    rounded-lg hover:bg-blue-700">
+                                    Save
+                                </button>
+                                <button type="button"
+                                    id="clear-admin-key-btn"
+                                    class="px-4 py-2 bg-gray-200 text-gray-700
+                                    rounded-lg hover:bg-gray-300
+                                    dark:bg-gray-700 dark:text-gray-200">
+                                    Clear
+                                </button>
+                            </div>
+                            <p id="admin-key-status"
+                               class="text-sm text-gray-500 mt-2"></p>
+                        </div>
+
                         <!-- Auto-mapping Regex -->
                         <div class="card">
                             <h2 class="text-xl font-bold mb-4">
@@ -1842,6 +1880,46 @@ strip_match = false             # strip matched phrase (default: false)</pre>
             catch (e) { ccmLocale = 'zh-CN'; }
             const ccmMessages = {};
 
+            // Admin API key injection: monkey-patch window.fetch so every
+            // request to /api/* (and /) automatically attaches the
+            // x-ccm-admin-key header stored in localStorage. Minimal-intrusion:
+            // no per-call changes needed. When the server has no admin_key
+            // configured, the header is simply ignored (backward compatible).
+            (function setupAdminAuth() {
+                const KEY_STORAGE = 'ccmAdminKey';
+                const originalFetch = window.fetch.bind(window);
+                window.fetch = async function (input, init) {
+                    const url = typeof input === 'string' ? input
+                              : (input && input.url) || '';
+                    // Only inject for admin routes (not /v1/* LLM calls or
+                    // external CDNs/HTMX). OAuth authorize/exchange/callback
+                    // carry their own state and come from browser redirects
+                    // (no admin key). OAuth token *management* endpoints
+                    // (/api/oauth/tokens*) ARE admin-gated, so only exclude the
+                    // three flow endpoints.
+                    const isAdmin = url.startsWith('/api/') &&
+                                    !url.startsWith('/api/oauth/authorize') &&
+                                    !url.startsWith('/api/oauth/exchange') &&
+                                    !url.startsWith('/api/oauth/callback') &&
+                                    !url.startsWith('/auth/callback');
+                    if (isAdmin || url === '/') {
+                        let key;
+                        try { key = localStorage.getItem(KEY_STORAGE) || ''; }
+                        catch (e) { key = ''; }
+                        if (key) {
+                            init = init || {};
+                            const headers = new Headers(init.headers || {});
+                            // Don't override an explicitly-set admin key.
+                            if (!headers.has('x-ccm-admin-key')) {
+                                headers.set('x-ccm-admin-key', key);
+                                init.headers = headers;
+                            }
+                        }
+                    }
+                    return originalFetch(input, init);
+                };
+            })();
+
             async function loadI18n(loc) {
                 if (ccmMessages[loc]) return;
                 try {
@@ -2156,7 +2234,15 @@ strip_match = false             # strip matched phrase (default: false)</pre>
 
             function startLogsStream() {
                 stopLogsStream();
-                logsEventSource = new EventSource("/api/logs/stream");
+                // EventSource cannot set custom headers, so for admin_key-guarded
+                // servers we pass the key via query param (middleware accepts
+                // ?key= as a fallback for */stream endpoints). No-op when unset.
+                let adminKey = '';
+                try { adminKey = localStorage.getItem('ccmAdminKey') || ''; } catch (e) {}
+                const streamUrl = adminKey
+                    ? `/api/logs/stream?key=${encodeURIComponent(adminKey)}`
+                    : '/api/logs/stream';
+                logsEventSource = new EventSource(streamUrl);
                 logsEventSource.onmessage = (ev) => {
                     try {
                         const msg = JSON.parse(ev.data);
@@ -3395,6 +3481,37 @@ strip_match = false             # strip matched phrase (default: false)</pre>
                             500,
                         );
                     });
+                });
+            }
+
+            function setupAdminKeyUI() {
+                const input = document.getElementById("admin-key-input");
+                const saveBtn = document.getElementById("save-admin-key-btn");
+                const clearBtn = document.getElementById("clear-admin-key-btn");
+                const status = document.getElementById("admin-key-status");
+                if (!input || !saveBtn || !clearBtn || !status) return;
+                // Pre-fill from localStorage.
+                let stored = '';
+                try { stored = localStorage.getItem('ccmAdminKey') || ''; }
+                catch (e) {}
+                input.value = stored;
+                status.textContent = stored
+                    ? "Admin key is set (stored in this browser)."
+                    : "No admin key set — admin routes are open (server has no admin_key).";
+                saveBtn.addEventListener("click", () => {
+                    const val = input.value.trim();
+                    try {
+                        if (val) localStorage.setItem('ccmAdminKey', val);
+                        else localStorage.removeItem('ccmAdminKey');
+                    } catch (e) {}
+                    status.textContent = val
+                        ? "✅ Admin key saved. All admin requests will use it."
+                        : "Cleared. Admin routes are open.";
+                });
+                clearBtn.addEventListener("click", () => {
+                    try { localStorage.removeItem('ccmAdminKey'); } catch (e) {}
+                    input.value = "";
+                    status.textContent = "Cleared. Admin routes are open.";
                 });
             }
 
@@ -4639,6 +4756,8 @@ strip_match = false             # strip matched phrase (default: false)</pre>
 
                 // Initialize provider UI based on current selection
                 updateProviderUI();
+                // Admin key UI (after the DOM is ready, inside settings tab).
+                setupAdminKeyUI();
             });
 
             // Handle browser back/forward buttons

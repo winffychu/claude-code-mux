@@ -24,11 +24,25 @@ host = "127.0.0.1"
 # The RUST_LOG environment variable, if set, overrides this.
 log_level = "info"
 
-# Optional: API key clients must present to access CCM.
-# When set, requests must include `x-api-key: <this-value>`.
+# Optional: API key clients must present to access CCM LLM endpoints
+# (/v1/messages, /v1/chat/completions, /v1/models, /v1/messages/count_tokens).
+# When set, requests must include `x-api-key: <key>` OR
+# `Authorization: Bearer <key>` (standard Anthropic/OpenAI conventions —
+# existing clients work without modification). When unset (or empty), LLM
+# endpoints are open (backward compatible for local use).
+# Auth headers are stripped by headers::BLOCK_LIST — never forwarded upstream
+# (providers send their own configured credentials).
 # Can reference an env var with the `$VAR_NAME` syntax:
 #   api_key = "$MY_CCM_KEY"
 # api_key = "<your-ccm-api-key>"
+
+# Optional: admin key for the admin UI and management API
+# (/api/config/json, /api/reload, /api/logs, /api/logs/stream, /,
+# /api/i18n). When set, requests must include `x-ccm-admin-key: <key>`.
+# When unset (or empty), admin routes are open (backward compatible).
+# Can reference an env var with the `$VAR_NAME` syntax:
+#   admin_key = "$MY_CCM_ADMIN_KEY"
+# admin_key = "<your-ccm-admin-key>"
 
 # -----------------------------------------------------------------------------
 # [server.timeouts] — HTTP client timeouts (all optional, have defaults)

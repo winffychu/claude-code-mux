@@ -658,6 +658,56 @@ Result: kimi-k2-thinking (long context model)
 - Background: `glm-4.5-air`
 - WebSearch: `glm-4.6`
 
+## Security (Auth Gateways)
+
+CCM supports optional auth gateways for both the LLM proxy surface and the admin
+surface. Both are **opt-in and backward compatible** — when a key is unset (or
+empty), the corresponding surface stays open, so existing local unauthenticated
+setups keep working unchanged.
+
+### LLM Proxy Auth (`server.api_key`)
+
+When set, requests to the LLM-proxy endpoints (`/v1/messages`,
+`/v1/chat/completions`, `/v1/models`, `/v1/messages/count_tokens`) must include
+one of:
+
+- `x-api-key: <key>` — Anthropic convention
+- `Authorization: Bearer <key>` — OpenAI convention
+
+Both forms are accepted interchangeably, so **existing Anthropic/OpenAI clients
+work without modification**. Unset/empty → endpoints open.
+
+### Admin Auth (`server.admin_key`)
+
+When set, admin routes (`/api/config/json`, `/api/reload`, `/api/logs`,
+`/api/logs/stream`, `/api/i18n`, `/`, and OAuth token-management endpoints
+`/api/oauth/tokens*`) require `x-ccm-admin-key: <key>`. Unset/empty → admin open.
+
+> **SSE note**: the browser `EventSource` API cannot set custom request headers,
+> so `/api/logs/stream` also accepts the key via the `?key=` query param (header
+> still takes precedence; query fallback restricted to `*/stream` paths only).
+> The Admin UI's live-logs viewer uses this automatically.
+
+### Config & `$ENV_VAR` syntax
+
+```toml
+[server]
+api_key = "sk-..."             # or "$MY_CCM_API_KEY"
+admin_key = "$MY_CCM_ADMIN_KEY" # env-var indirection, resolved at load + reload
+```
+
+Both keys support `$ENV_VAR` syntax (resolved at config load and on `POST
+/api/reload`). The Admin UI Settings tab has an "Admin Access Key" card that
+stores the key in browser `localStorage` and auto-attaches it to every admin
+fetch via a `window.fetch` monkey-patch.
+
+### Auth headers never forwarded upstream
+
+`x-api-key`, `authorization`, and `x-ccm-admin-key` are in `headers::BLOCK_LIST`
+— they are **stripped before forwarding to upstream providers**, so client CCM
+auth credentials never leak to or conflict with provider credentials. Key
+comparison uses constant-time comparison to mitigate timing side-channels.
+
 ## Advanced Features
 
 ### OAuth Authentication (FREE for Claude Pro/Max, ChatGPT Plus/Pro & Google AI Pro/Ultra)

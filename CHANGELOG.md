@@ -8,6 +8,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.6.3-eli.1] - 2026-07-14
 
 ### Added
+- **Auth gateways** (opt-in, backward compatible):
+  - `server.api_key`: when set, LLM proxy endpoints (`/v1/messages`,
+    `/v1/chat/completions`, `/v1/models`, `/v1/messages/count_tokens`)
+    require `x-api-key: <key>` OR `Authorization: Bearer <key>` (standard
+    Anthropic/OpenAI conventions — existing clients work unmodified).
+    Unset/empty → endpoints open (backward compatible for local use).
+  - `server.admin_key`: when set, admin routes (`/api/config/json`,
+    `/api/reload`, `/api/logs`, `/api/logs/stream`, `/api/i18n`, `/`)
+    require `x-ccm-admin-key: <key>`. Unset/empty → admin open.
+    The SSE stream endpoint `/api/logs/stream` also accepts the key via
+    `?key=` query param (EventSource cannot set custom headers), header
+    still takes precedence; query fallback is restricted to `*/stream`
+    paths only (see admin UI live-logs viewer).
+  - Both keys support `$ENV_VAR` syntax (resolved at config load).
+  - Admin UI Settings tab now has an "Admin Access Key" card — the key is
+    stored in the browser's localStorage and auto-attached to every admin
+    fetch via a `window.fetch` monkey-patch (no per-call changes).
+  - Auth headers `x-api-key`, `authorization`, `x-ccm-admin-key` added to
+    `headers::BLOCK_LIST` — they are **never forwarded to upstream providers**,
+    preventing client CCM-auth credentials from leaking to or conflicting with
+    provider credentials.
+  - Constant-time key comparison mitigates timing side-channels (length leaked
+    via early-return; acceptable for high-entropy keys — documented).
+  - OAuth token **management** endpoints (`/api/oauth/tokens`,
+    `/api/oauth/tokens/delete`, `/api/oauth/tokens/refresh`) moved behind the
+    admin_key gate (they can enumerate/delete/refresh tokens). The OAuth
+    **flow** endpoints (authorize/exchange/callback, `/auth/callback`) stay
+    public as they come from browser redirects.
+  - `reload_config` now re-runs `resolve_env_vars()` after disk reparse, so
+    `$ENV_VAR` keys stay resolved post-reload (previously left as literal
+    `$VAR` → auth breakage).
 - Fork-specific: OpenAI-compatible `/v1/chat/completions` tool/function calling support
 - OpenAI-compatible `/v1/models` endpoint (aggregates provider models, BTreeSet dedup)
 - Message tracing with BufWriter (buffered I/O, lazy flush on /api/logs)

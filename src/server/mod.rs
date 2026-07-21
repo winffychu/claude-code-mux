@@ -7,7 +7,7 @@ use crate::cli::{AppConfig, PromptRule, RouterRule};
 use crate::models::{AnthropicRequest, RouteType};
 use crate::router::Router;
 use crate::providers::ProviderRegistry;
-use crate::auth::TokenStore;
+use crate::auth::{require_admin_key, require_api_key, TokenStore};
 use crate::message_tracing::MessageTracer;
 use axum::{
     body::Body,
@@ -19,6 +19,7 @@ use axum::{
     routing::{get, post},
     Json, Router as AxumRouter,
 };
+use axum::middleware::from_fn_with_state;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing::{debug, error, info};
@@ -148,28 +149,47 @@ pub async fn start_server(config: AppConfig, config_path: std::path::PathBuf) ->
         config_path,
     });
 
-    // Build router
-    let app = AxumRouter::new()
-        .route("/", get(serve_admin))
+    // Build router with auth gateways.
+    // - LLM proxy routes (/v1/*) gated by `require_api_key` (server.api_key).
+    // - Admin routes gated by `require_admin_key` (server.admin_key).
+    // - /health, /api/oauth/authorize|exchange|callback, /auth/callback are
+    //   exempt (health + OAuth browser-redirect flow carries its own state).
+    //   OAuth token *management* (tokens/delete/refresh) is admin-gated.
+    //
+    // Both middlewares pass through when the corresponding config key is None,
+    // so existing local unauthenticated setups keep working (backward compat).
+    let llm_routes = AxumRouter::new()
         .route("/v1/messages", post(handle_messages))
         .route("/v1/messages/count_tokens", post(handle_count_tokens))
         .route("/v1/chat/completions", post(handle_openai_chat_completions))
         .route("/v1/models", get(handle_list_models))
-        .route("/health", get(health_check))
+        .layer(from_fn_with_state(state.clone(), require_api_key));
+
+    let admin_routes = AxumRouter::new()
+        .route("/", get(serve_admin))
         .route("/api/config/json", get(get_config_json))
         .route("/api/config/json", post(update_config_json))
         .route("/api/reload", post(reload_config))
-        // OAuth endpoints
+        .route("/api/logs", get(logs::get_logs))
+        .route("/api/logs/stream", get(logs::stream_logs))
+        .route("/api/i18n/:locale", get(i18n::get_i18n_dict))
+        // OAuth token management (list/delete/refresh) — admin-gated.
+        // authorize/exchange/callback stay public (browser OAuth redirect).
+        .route("/api/oauth/tokens", get(oauth_handlers::oauth_list_tokens))
+        .route("/api/oauth/tokens/delete", post(oauth_handlers::oauth_delete_token))
+        .route("/api/oauth/tokens/refresh", post(oauth_handlers::oauth_refresh_token))
+        .layer(from_fn_with_state(state.clone(), require_admin_key));
+
+    let app = AxumRouter::new()
+        .route("/health", get(health_check))
+        // OAuth flow endpoints (authorize/exchange/callback have their own flow
+        // and come from browser redirects — must stay public).
         .route("/api/oauth/authorize", post(oauth_handlers::oauth_authorize))
         .route("/api/oauth/exchange", post(oauth_handlers::oauth_exchange))
         .route("/api/oauth/callback", get(oauth_handlers::oauth_callback))
         .route("/auth/callback", get(oauth_handlers::oauth_callback))  // OpenAI Codex uses this path
-        .route("/api/oauth/tokens", get(oauth_handlers::oauth_list_tokens))
-        .route("/api/oauth/tokens/delete", post(oauth_handlers::oauth_delete_token))
-        .route("/api/oauth/tokens/refresh", post(oauth_handlers::oauth_refresh_token))
-        .route("/api/logs", get(logs::get_logs))
-        .route("/api/logs/stream", get(logs::stream_logs))
-        .route("/api/i18n/:locale", get(i18n::get_i18n_dict));
+        .merge(llm_routes)
+        .merge(admin_routes);
 
     // Clone state before moving it
     let oauth_state = state.clone();
@@ -538,13 +558,20 @@ async fn reload_config(State(state): State<Arc<AppState>>) -> Response {
         }
     };
 
-    let new_config: AppConfig = match toml::from_str(&config_str) {
+    let mut new_config: AppConfig = match toml::from_str(&config_str) {
         Ok(c) => c,
         Err(e) => {
             error!("Failed to parse config: {}", e);
             return Html(format!("<div class='px-4 py-3 rounded-xl bg-red-500/20 border border-red-500/50 text-foreground text-sm'><strong>❌ Reload failed</strong><br/>Failed to parse config: {}</div>", e)).into_response();
         }
     };
+
+    // Re-resolve $ENV_VAR after disk change — matches startup path. Otherwise
+    // admin_key="..." in config-stays-as-literal-$VAR breaks auth post-reload.
+    if let Err(e) = new_config.resolve_env_vars() {
+        error!("Failed to resolve env vars in config: {}", e);
+        return Html(format!("<div class='px-4 py-3 rounded-xl bg-red-500/20 border border-red-500/50 text-foreground text-sm'><strong>❌ Reload failed</strong><br/>Env var resolution: {}</div>", e)).into_response();
+    }
 
     // 2. Build new router (compiles regexes)
     let new_router = Router::new(new_config.clone());

@@ -23,6 +23,11 @@ pub struct ServerConfig {
     #[serde(default = "default_host")]
     pub host: String,
     pub api_key: Option<String>,
+    /// Admin API key for admin routes (/api/config/json, /api/reload,
+    /// /api/logs, /, etc.). When None, admin routes are open. When set,
+    /// clients must send `x-ccm-admin-key: <value>`. Supports $ENV_VAR.
+    #[serde(default)]
+    pub admin_key: Option<String>,
     #[serde(default = "default_log_level")]
     pub log_level: String,
     #[serde(default)]
@@ -92,6 +97,7 @@ impl Default for ServerConfig {
             port: default_port(),
             host: default_host(),
             api_key: None,
+            admin_key: None,
             log_level: default_log_level(),
             timeouts: TimeoutConfig::default(),
             tracing: TracingConfig::default(),
@@ -475,13 +481,24 @@ default = "placeholder-model"
 "#.to_string()
     }
 
-    /// Resolve environment variables in configuration
-    fn resolve_env_vars(&mut self) -> Result<()> {
+    /// Resolve environment variables in configuration.
+    ///
+    /// `pub(crate)` so `server::reload_config` can re-resolve `$ENV_VAR`
+    /// after a config file changes on disk — otherwise reload would read the
+    /// literal `$VAR` string as the key and break auth (or providers).
+    pub(crate) fn resolve_env_vars(&mut self) -> Result<()> {
         // Resolve server API key
         if let Some(ref key) = self.server.api_key {
             if key.starts_with('$') {
                 let env_var = &key[1..];
                 self.server.api_key = std::env::var(env_var).ok();
+            }
+        }
+        // Resolve server admin key
+        if let Some(ref key) = self.server.admin_key {
+            if key.starts_with('$') {
+                let env_var = &key[1..];
+                self.server.admin_key = std::env::var(env_var).ok();
             }
         }
 
@@ -545,6 +562,64 @@ default = "placeholder-model"
 //         assert_eq!(config.server.port, 3456);
 //         assert_eq!(config.litellm.endpoint, "http://localhost:4000");
 //         assert_eq!(config.litellm.api_key, "anything");
-//         assert_eq!(config.router.default, "default");
 //     }
 // }
+
+#[cfg(test)]
+mod env_var_resolve_tests {
+    use super::*;
+
+    fn cfg_with_keys(api_key: &str, admin_key: &str) -> AppConfig {
+        let toml = format!(
+            r#"
+[server]
+api_key = "{api}"
+admin_key = "{admin}"
+[router]
+default = "default-model"
+"#,
+            api = api_key,
+            admin = admin_key,
+        );
+        // Minimal seed: server (the section we test) + router.default (required
+        // to satisfy AppConfig's router parsing). No models/providers needed.
+        toml::from_str::<AppConfig>(&toml)
+            .unwrap_or_else(|e| panic!("seed parses: {e}"))
+    }
+
+    /// resolve_env_vars must turn `$VAR` literals into the env value for both
+    /// api_key and admin_key (parallel treatment). Covers the P1.3 reload path.
+    #[test]
+    fn resolve_env_vars_substitutes_server_keys() {
+        let unique = "CCM_TEST_KEY_RESOLVE_UNIQUE_20260720";
+        std::env::set_var(unique, "resolved-secret-value");
+        let mut cfg = cfg_with_keys(&format!("${unique}"), &format!("${unique}"));
+        cfg.resolve_env_vars().expect("env present, should resolve");
+        assert_eq!(cfg.server.api_key.as_deref(), Some("resolved-secret-value"));
+        assert_eq!(cfg.server.admin_key.as_deref(), Some("resolved-secret-value"));
+        std::env::remove_var(unique);
+    }
+
+    /// When the env var is missing, `$VAR` resolves to None (middleware treats
+    /// None as no-auth). Documents the existing footgun behavior for awareness.
+    #[test]
+    fn resolve_env_vars_missing_env_yields_none() {
+        let mut cfg = cfg_with_keys(
+            "$CCM_NONEXISTENT_VAR_XYZ_123",
+            "$CCM_NONEXISTENT_VAR_XYZ_456",
+        );
+        cfg.resolve_env_vars()
+            .expect("server keys: missing env → None, no bail");
+        assert_eq!(cfg.server.api_key, None);
+        assert_eq!(cfg.server.admin_key, None);
+    }
+
+    /// Literal (non-$) keys pass through unchanged.
+    #[test]
+    fn resolve_env_vars_literal_keys_unchanged() {
+        let mut cfg = cfg_with_keys("literal-key-no-dollar", "another-literal");
+        cfg.resolve_env_vars().expect("literals resolve trivially");
+        assert_eq!(cfg.server.api_key.as_deref(), Some("literal-key-no-dollar"));
+        assert_eq!(cfg.server.admin_key.as_deref(), Some("another-literal"));
+    }
+}

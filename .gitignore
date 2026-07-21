@@ -30,3 +30,4 @@ response.txt
 .claude/settings.local.json
 log.txt
 trace.jsonl
+cache.db
