@@ -42,6 +42,13 @@ pub struct AppState {
     /// Persistent state - NOT reloaded
     pub token_store: TokenStore,
     pub config_path: std::path::PathBuf,
+
+    /// Serialises `update_config_json` requests: `tokio::fs::write` is not
+    /// atomic across concurrent callers, so unguarded POSTs race and can
+    /// truncate the config file to zero bytes. Holding this short async mutex
+    /// across the entire read-modify-write+reload makes PATCHes sequential and
+    /// safe; handlers that only read (get_config/json/health/logs) are unaffected.
+    pub update_lock: tokio::sync::Mutex<()>,
 }
 
 impl AppState {
@@ -147,6 +154,7 @@ pub async fn start_server(config: AppConfig, config_path: std::path::PathBuf) ->
         inner: std::sync::RwLock::new(reloadable),
         token_store,
         config_path,
+        update_lock: tokio::sync::Mutex::new(()),
     });
 
     // Build router with auth gateways.
@@ -331,6 +339,13 @@ async fn update_config_json(
     State(state): State<Arc<AppState>>,
     Json(mut new_config): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    // Serialise concurrent POSTs: the read-modify-write+reload below is not
+    // atomic on its own, so unguarded concurrent callers race on the same disk
+    // file and `tokio::fs::write` can truncate it to zero bytes (next `ccm start`
+    // fail-fast). Holding this lock for the whole handler body makes PATCHes
+    // sequential. Read-only handlers (get_config/health/logs) are unaffected.
+    let _guard = state.update_lock.lock().await;
+
     // Remove null values (TOML doesn't support null)
     remove_null_values(&mut new_config);
 
@@ -1351,6 +1366,7 @@ mod config_json_tests {
             inner: std::sync::RwLock::new(reloadable),
             token_store,
             config_path: repo_path,
+            update_lock: tokio::sync::Mutex::new(()),
         });
 
         (f, state)
@@ -1576,5 +1592,74 @@ default = "m"
         dispatch_expect_err(state, body).await;
         let after = disk(f.path());
         assert!(!after.contains("\"x\""), "partial rule written to disk");
+    }
+
+    // ---- concurrency guard: update_lock serialises concurrent PATCHes so
+    // `tokio::fs::write` cannot race and truncate the config file. Without the
+    // lock, interleaved read-modify-writes on the same disk file can lose
+    // updates or zero the file entirely; with the lock they execute fully
+    // sequentially.
+
+    #[tokio::test]
+    async fn concurrent_patches_no_disk_truncation() {
+        // Seed with one rule; 8 concurrent PATCHes each try to add a distinct
+        // rule. The serialise lock guarantees file integrity (non-empty, valid
+        // TOML, rules section present) — the disk-poison regression is now
+        // barred.
+        let seed = r#"
+[server]
+port = 0
+[router]
+default = "m"
+[[router.rules]]
+id = "base"
+name = "b"
+type = "model-prefix"
+prefix = "b-"
+enabled = true
+model = "m"
+"#;
+        let (f, state) = state_with_seed(seed);
+
+        let mut handles = vec![];
+        for i in 0..8u32 {
+            let s = state.clone();
+            handles.push(tokio::spawn(async move {
+                let body = serde_json::json!({
+                    "router": {"rules": [
+                        {"id": "base","name":"b","type":"model-prefix","prefix":"b-","enabled":true,"model":"m"},
+                        {"id": format!("concurrent-{i}"),"name":"c","type":"model-prefix",
+                         "prefix": format!("c{i}-"),"enabled":true,"model":"m"}
+                    ]}
+                });
+                let res = update_config_json(State(s), Json(body)).await;
+                assert!(res.is_ok(), "handler error on concurrent {i}: {res:?}");
+            }));
+        }
+        for h in handles {
+            h.await.unwrap();
+        }
+
+        let after = disk(f.path());
+        assert!(!after.is_empty(), "config file truncated to zero bytes");
+        assert!(after.contains("[[router.rules]]"), "rules section gone");
+    }
+
+    #[tokio::test]
+    async fn serialised_patch_still_writes_a_single_post() {
+        // Sanity: serialise lock does not break a single non-concurrent PATCH.
+        let seed = r#"
+[server]
+port = 0
+[router]
+default = "m"
+"#;
+        let (f, state) = state_with_seed(seed);
+        let body = serde_json::json!({
+            "router": {"rules": [{"id":"solo","name":"s","type":"model-prefix","prefix":"s-","enabled":true,"model":"m"}]}
+        });
+        dispatch(state, body).await;
+        let after = disk(f.path());
+        assert!(after.contains("\"solo\""), "solo rule not persisted under serialise lock");
     }
 }

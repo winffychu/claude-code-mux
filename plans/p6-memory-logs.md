@@ -183,8 +183,8 @@ let stream = async_stream::stream! { ... }  // 或 unfold
 下列两条在 P6 实施后的真机审计中发现，经确认为**设计权衡**而非缺陷：
 
 - **fallback 链每尝试一个 provider mapping 就记一条 `req` trace 条目**：
-  `trace_request` 在 `src/server/mod.rs` 的 fallback for 循环内调用（L703
-  OpenAI 端点、L979 Anthropic 端点），与 stdout `info!` 的 `[n/N]` 重试
+  `trace_request` 在 `src/server/mod.rs` 的 fallback for 循环内调用（`fn handle_openai_chat_completions`
+  OpenAI 端点、`fn handle_messages` Anthropic 端点），与 stdout `info!` 的 `[n/N]` 重试
   标记同步——记录每次 fallback 尝试的 actual_model，便于排查"哪个上游
   被尝试、哪个成功/失败"。`/api/logs` 的 `total` 是**trace 条目数**
   而非请求数；前端按 `trace_id` 去重才是请求数。

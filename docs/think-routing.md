@@ -253,8 +253,8 @@ model = "think-target-model"
 ### 8.4 相关行为（非缺陷，已确认是设计）
 
 - **fallback 每次 attempt 在 `/api/logs` 各记一条 `req`**：`src/server/mod.rs`
-  L703/OpenAI 端点、L979/Anthropic 端点的 `trace_request` 在 fallback for 循环
-  内，每 mapping flag 一条。这与 stdout `info!`（L655 `retry_info=[n/N]`）
+  `fn handle_openai_chat_completions` / `fn handle_messages` 的 `trace_request` 在 fallback for 循环
+  内，每 mapping flag 一条。这与 stdout `info!`（`fn handle_openai_chat_completions` 内的 `retry_info=[n/N]`）
   一致——日志和终端**都正确反映每次 fallback 链路**，可观测，非 bug。
 - **err 条目在 `/api/logs` 丢了 model/provider/route_type**（`trace_error`
   `src/message_tracing/mod.rs` L337-361 把这些字段置 None）：影响为网页
